@@ -100,14 +100,15 @@ export const THEMES: Record<ThemeId, ClassicTheme> = {
     id: 'isvec',
     name: 'İsveç 68',
     era: "1960'LAR · İSKANDİNAV",
-    tagline: 'Siyah panel · soldan büyüyen turuncu bant · altta saat ve sayaç',
+    tagline: 'Siyah panel · beyaz rakamlar · soldan büyüyen kırmızı bant · altta saat ve sayaç',
     gauge: 'band',
     fascia: 'crackle',
     glyph: 'classic',
     maxKmh: 160,
     maxMph: 100,
-    day: { ...base, bg: '#151515', face: '#0A0A0A', text: '#F2F2EE', needle: '#FF6A1F', chrome: '#BFC3C7', primary: '#FF8A3A', secondary: '#F2F2EE', holo: '#FF6A1F', dim: '#8E8E8A', glass: 'rgba(255,255,255,0.05)' },
-    night: { ...base, bg: '#070707', face: '#050505', text: '#BDEBFF', needle: '#FF5A12', chrome: '#4E5256', primary: '#9FD8FF', secondary: '#BDEBFF', holo: '#FF5A12', dim: '#4A5A64', glass: 'rgba(159,216,255,0.05)' },
+    // Standart renkler: beyaz rakamlar, kırmızı ibre (gündüz ve gece aynı; gece yalnızca hafif kısılır)
+    day: { ...base, bg: '#151515', face: '#0A0A0A', text: '#FFFFFF', needle: '#E3261C', chrome: '#BFC3C7', primary: '#E3261C', secondary: '#FFFFFF', holo: '#E3261C', dim: '#8E8E8A', glass: 'rgba(255,255,255,0.05)' },
+    night: { ...base, bg: '#070707', face: '#050505', text: '#EDEDED', needle: '#D0221A', chrome: '#4E5256', primary: '#D0221A', secondary: '#EDEDED', holo: '#D0221A', dim: '#5A5A58', glass: 'rgba(255,255,255,0.04)' },
   },
   yesil: {
     id: 'yesil',

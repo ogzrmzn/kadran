@@ -9,7 +9,7 @@ Nexus HUD ile aynı ekran düzenini kullanır ama ondan tamamen bağımsız bir 
 |---|---|---|
 | Fildişi 124 | 1960'lar İtalyan | Fildişi gövde, üstte siyah rakam şeridi, alttan yelpaze ibre, krom ızgara, lamba sırası; küçük göstergeler GPS sinyali ve maksimum hızı gösterir |
 | Bordo 55 | 1950'ler Amerikan V8 | Bordo lake panel, krom çerçeveli siyah yelpaze kadran, eğik rakamlar ve noktalar |
-| İsveç 68 | 1960'lar İskandinav | Siyah panelde soldan büyüyen turuncu bant, altta saat ve sayaç |
+| İsveç 68 | 1960'lar İskandinav | Siyah panelde beyaz rakamlar, soldan büyüyen kırmızı bant, altta saat ve sayaç |
 | Yeşil Klasik | 1950'ler | Yeşil boyalı panel, büyük krem kadran, kırmızı ibre |
 | Anadolu 131 | 1970'ler sedan | İki yuvarlak kadran (hız + analog saat), turuncu ibre, kilometre sayacı, uyarı lambaları |
 | Şerit 124 | 1960'lar | Yatay skala üzerinde sağa sola kayan ibre, alüminyum panel |
