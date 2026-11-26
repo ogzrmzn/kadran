@@ -1,7 +1,7 @@
 # KADRAN · Klasik Gösterge
 
 Klasik araç göstergeleri: hız telefonun GPS'inden ölçülür, analog ibreler ve eski dijital ekranlar gerçek zamanlı çalışır.
-Nexus HUD ile aynı ekran düzenini kullanır ama ondan tamamen bağımsız bir uygulamadır (ayrı ad, kimlik ve ayar deposu).
+Kendi adı, simgesi, uygulama kimliği ve ayar deposu olan bağımsız bir uygulamadır.
 
 ## Temalar (her biri farklı geometri)
 
