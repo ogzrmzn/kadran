@@ -63,12 +63,31 @@ export function compassLabel(deg: number | null): string {
 const STOP_KMH = 3;
 /** Konum doğruluğu bundan kötüyse mesafeye eklenmez */
 const MAX_ACCURACY_M = 35;
+/** Cihaz hızı (Doppler) bundan kötü doğrulukta kullanılmaz */
+const MAX_DEVICE_SPEED_ACC_M = 100;
+/** Bir otomobilin gerçekçi en yüksek hızlanma / yavaşlama oranı (km/sa / sn); üstü GPS sıçramasıdır */
+export const MAX_ACCEL_KMH_S = 25;
+export const MAX_DECEL_KMH_S = 35;
+
+/**
+ * Yeni ölçümü gösterilen hıza yumuşakça katar (GPS gürültüsü ibreye titreme olarak yansımasın):
+ * önce fiziksel olarak imkânsız sıçramalar sınırlanır, sonra üstel süzgeç uygulanır.
+ * Doppler hızı (cihaz) temiz olduğundan hızlı, konumdan hesaplanan hız gürültülü olduğundan daha yavaş izlenir.
+ */
+export function smoothSpeed(prevKmh: number, measuredKmh: number, dt: number, device: boolean): number {
+  const step = Math.max(0.5, Math.min(dt, 5));
+  const target = Math.min(prevKmh + MAX_ACCEL_KMH_S * step, Math.max(prevKmh - MAX_DECEL_KMH_S * step, measuredKmh));
+  const a = device ? 0.75 : 0.5;
+  const k = 1 - Math.pow(1 - a, step);
+  return prevKmh + (target - prevKmh) * k;
+}
 
 /**
  * Yeni GPS noktasıyla yolculuğu günceller.
  * - Cihazın verdiği hız varsa o kullanılır; yoksa iki nokta arasından hesaplanır.
  * - Telefonun aynı konumu yeni saatle tekrar göndermesi (mesafe ~0) hız ölçümü sayılmaz.
  * - Hız ancak ZERO_HOLD_MS boyunca düşük kalırsa 0 gösterilir; arada bir gelen hatalı 0 göstergeyi düşürmez.
+ * - Hareket halindeyken ölçüm sıçramaları sınırlanır ve süzülür (smoothSpeed).
  */
 export function addPoint(trip: Trip, p: GpsPoint): Trip {
   const prev = trip.last;
@@ -79,7 +98,8 @@ export function addPoint(trip: Trip, p: GpsPoint): Trip {
 
   // Bu noktadaki ölçülen hız (km/sa); ölçüm yoksa null
   let measured: number | null = null;
-  if (p.speed != null && p.speed >= 0) measured = p.speed * 3.6;
+  const deviceSpeed = p.speed != null && p.speed >= 0 && (p.accuracy == null || p.accuracy <= MAX_DEVICE_SPEED_ACC_M);
+  if (deviceSpeed) measured = p.speed! * 3.6;
   else if (prev && goodFix && !duplicate && dt >= 0.8) measured = (d / dt) * 3.6;
 
   // Gösterilen hız: düşük ölçüm hemen değil, belli süre sürerse 0 olur
@@ -91,7 +111,8 @@ export function addPoint(trip: Trip, p: GpsPoint): Trip {
       if (trip.speedKmh < STOP_KMH || p.time - lowSince >= ZERO_HOLD_MS) shown = 0;
     } else {
       lowSince = null;
-      shown = measured;
+      // Kalkışta (ya da ilk ölçümde) doğrudan; hareket halindeyken süzülerek
+      shown = trip.speedKmh < STOP_KMH || !prev || dt <= 0 ? measured : smoothSpeed(trip.speedKmh, measured, dt, deviceSpeed);
     }
   }
 

@@ -1,6 +1,6 @@
 import * as Haptics from 'expo-haptics';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Platform, useWindowDimensions, View, type LayoutChangeEvent } from 'react-native';
 import Animated, { FadeIn, useAnimatedStyle, useReducedMotion, useSharedValue, withRepeat, withSequence, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -106,7 +106,8 @@ export default function Cockpit() {
   };
 
   // Kadran rakamlarının rengi temadan ayrı seçilebilir (varsayılan: temanın kendi rengi)
-  const speedPal = nx.speedColor ? { ...pal, text: nx.speedColor } : pal;
+  // (useMemo: palet her saniye yeni nesne olmasın; gösterge yalnızca gerçekten değişince yeniden çizilsin)
+  const speedPal = useMemo(() => (nx.speedColor ? { ...pal, text: nx.speedColor } : pal), [pal, nx.speedColor]);
   const signal: Signal = gps.status === 'bagli' || gps.status === 'demo' ? 'ok' : gps.status === 'zayif' ? 'weak' : 'none';
   const odo = fixed ? distanceText(gps.trip.distanceM, nx.unit) : null;
   const gauge = (aw: number, ah: number) => {
@@ -124,11 +125,10 @@ export default function Cockpit() {
         reduced={reduced}
         center={centerFor(gw)}
         assist={nx.digitalAssist}
-        now={gps.now}
         odo={odo}
         signal={signal}
         sigLevel={gps.status === 'demo' ? 4 : signal === 'none' ? 0 : signalBars(gps.accuracy)}
-        peak={fixed ? toUnit(gps.maxKmh, nx.unit) : null}
+        peak={fixed ? Math.round(toUnit(gps.maxKmh, nx.unit)) : null}
       />
     );
   };
@@ -175,8 +175,6 @@ export default function Cockpit() {
   const alert =
     gps.status === 'kayip' || gps.status === 'zayif' ? (
       <SignalAlert pal={pal} title={st.title} detail={gps.status === 'kayip' && gps.lastFixAt ? `Son veri ${Math.round((gps.now - gps.lastFixAt) / 1000)} sn önce · hız gösterilmiyor` : st.detail} reduced={reduced} />
-    ) : gps.status === 'demo' ? (
-      <SignalAlert pal={pal} title="DEMO VERİSİ" detail="Göstergeler gerçek hız değil · Ayarlar'dan kapatın" reduced />
     ) : null;
 
   return (
@@ -200,13 +198,23 @@ export default function Cockpit() {
           moving={moving}
           onPanel={() => setDrawer(true)}
         />
-        {alert ? <View style={{ marginTop: 8, alignItems: 'center' }}>{alert}</View> : null}
+        {/* Uyarı şeridi göstergenin üstüne biner: gösterge yer değiştirmez, yeniden boyutlanmaz */}
+        {alert ? (
+          <View pointerEvents="none" style={{ position: 'absolute', zIndex: 10, top: insets.top + 56, left: 0, right: 0, alignItems: 'center' }}>
+            <View style={{ backgroundColor: alpha(pal.bg, 0.92), borderRadius: 4 }}>{alert}</View>
+          </View>
+        ) : null}
         {/* Cama yansıtma: gösterge ve veriler çevrilir; üst şerit (düğmeler) düz kalır */}
         <View style={{ flex: 1, marginTop: 8, transform: !nx.cockpitMirror ? [] : nx.mirrorAxis === 'ust' ? [{ scaleY: -1 }] : [{ scaleX: -1 }] }}>{body}</View>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6, gap: 12 }}>
           <KdLabel color={alpha(pal.dim, 0.9)} size={8} spacing={1.6} style={{ textTransform: 'none' }}>
             {`${theme.name.toUpperCase()} · ${theme.era}`}
           </KdLabel>
+          {gps.status === 'demo' ? (
+            <KdLabel color={pal.warn} size={9} spacing={1.4}>
+              ⚠ DEMO VERİSİ · GERÇEK HIZ DEĞİL
+            </KdLabel>
+          ) : null}
           <KdLabel color={alpha(pal.dim, 0.9)} size={8} spacing={1.6}>
             KADRAN
           </KdLabel>

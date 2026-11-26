@@ -31,7 +31,7 @@ export interface GaugeProps {
   center?: ReactNode;
   /** Analog kadranda küçük dijital hız penceresi */
   assist?: boolean;
-  /** Analog saat için zaman (ms) */
+  /** Sabit saat (ms; yalnızca önizleme). Verilmezse saatler kendi kendine işler. */
   now?: number;
   /** Kilometre sayacı (yolculuk mesafesi) metni, ör. "12.4"; null = "--" */
   odo?: string | null;
@@ -299,8 +299,69 @@ function Lamp({ x, y, r, on, color, label }: { x: number; y: number; r: number; 
   );
 }
 
-/** Saat verilmezse (önizleme) vitrin saati 10:10 gösterilir */
-const SHOW_TIME = new Date(2026, 0, 1, 10, 9, 30).getTime();
+/**
+ * Kendi kendine işleyen saat. Saat kolları ayrı küçük bileşenlerdedir: gösterge, saat işledi diye
+ * her saniye baştan çizilmez. fixed verilirse (önizleme) sabit saat gösterilir.
+ */
+function useClock(fixed: number | undefined, seconds: boolean): Date {
+  const [t, setT] = useState(() => fixed ?? Date.now());
+  useEffect(() => {
+    if (fixed != null) return;
+    const id = setInterval(() => setT(Date.now()), seconds ? 1000 : 10000);
+    return () => clearInterval(id);
+  }, [fixed, seconds]);
+  return new Date(fixed ?? t);
+}
+
+/** Analog saat kolları (akrep, yelkovan, isteğe bağlı saniye) */
+const ClockHands = memo(function ClockHands({
+  cx,
+  cy,
+  hourLen,
+  minLen,
+  secLen,
+  hourW,
+  minW,
+  color,
+  secColor,
+  tail = 0,
+  fixed,
+}: {
+  cx: number;
+  cy: number;
+  hourLen: number;
+  minLen: number;
+  secLen?: number;
+  hourW: number;
+  minW: number;
+  color: string;
+  secColor?: string;
+  tail?: number;
+  fixed?: number;
+}) {
+  const d = useClock(fixed, secLen != null);
+  const mins = d.getMinutes() + d.getSeconds() / 60;
+  const hrs = (d.getHours() % 12) + mins / 60;
+  const hand = (deg: number, len: number) => {
+    const [x, y] = pt(cx, cy, len, deg - 90);
+    const [tx, ty] = pt(cx, cy, len * tail, deg + 90);
+    return `M${f2(tx)} ${f2(ty)}L${f2(x)} ${f2(y)}`;
+  };
+  return (
+    <G>
+      <Path d={hand(hrs * 30, hourLen)} stroke={color} strokeWidth={hourW} strokeLinecap="round" />
+      <Path d={hand(mins * 6, minLen)} stroke={color} strokeWidth={minW} strokeLinecap="round" />
+      {secLen != null ? <Path d={hand(d.getSeconds() * 6, secLen)} stroke={secColor ?? color} strokeWidth={minW * 0.4} /> : null}
+    </G>
+  );
+});
+
+/** Dijital saat (dakikada bir değişir) */
+const DigiClock = memo(function DigiClock({ x, y, h, color, fixed }: { x: number; y: number; h: number; color: string; fixed?: number }) {
+  const d = useClock(fixed, false);
+  const text = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  return <DialNum text={text} x={x} y={y} h={h} color={color} style="flat" />;
+});
 
 const numEvery = (max: number) => (max > 160 ? 20 : max > 100 ? 20 : 10);
 
@@ -330,9 +391,6 @@ const TwinGauge = memo(function TwinGauge({ speed, max, width, pal, unit, over, 
     return out;
   }, [cx, cy, R, max, step]);
   // Analog saat
-  const d = new Date(now ?? SHOW_TIME);
-  const mins = d.getMinutes() + d.getSeconds() / 60;
-  const hrs = (d.getHours() % 12) + mins / 60;
   const C = TW.r;
   const clockTicks = useMemo(() => {
     const a: string[] = [];
@@ -346,11 +404,6 @@ const TwinGauge = memo(function TwinGauge({ speed, max, width, pal, unit, over, 
     }
     return { big: a.join(''), small: b.join('') };
   }, [C.cx, C.cy, R]);
-  const hand = (deg: number, len: number) => {
-    const [x, y] = pt(C.cx, C.cy, len, deg - 90);
-    const [tx, ty] = pt(C.cx, C.cy, len * 0.18, deg + 90);
-    return `M${f2(tx)} ${f2(ty)}L${f2(x)} ${f2(y)}`;
-  };
   const housing = shade(pal.bg, 0.75);
   return (
     <Shell width={width} height={h} center={center} pal={pal}>
@@ -386,9 +439,7 @@ const TwinGauge = memo(function TwinGauge({ speed, max, width, pal, unit, over, 
           const [x, y] = pt(C.cx, C.cy, R - 8.4, i * 90 - 90);
           return <DialNum key={n} text={String(n)} x={x} y={y} h={3.6} color={pal.text} style="classic" />;
         })}
-        <Path d={hand(hrs * 30, 9.5)} stroke={pal.text} strokeWidth={1.5} strokeLinecap="round" />
-        <Path d={hand(mins * 6, 15)} stroke={pal.text} strokeWidth={1} strokeLinecap="round" />
-        <Path d={hand(d.getSeconds() * 6, 16.5)} stroke={pal.needle} strokeWidth={0.4} />
+        <ClockHands cx={C.cx} cy={C.cy} hourLen={9.5} minLen={15} secLen={16.5} hourW={1.5} minW={1} color={pal.text} secColor={pal.needle} tail={0.18} fixed={now} />
         <Circle cx={C.cx} cy={C.cy} r={1.4} fill={pal.needle} />
         {/* ortadaki uyarı lambaları */}
         <Lamp x={50} y={15} r={2.1} on={signal === 'ok'} color="#43D35C" label="G" />
@@ -482,16 +533,9 @@ const SportGauge = memo(function SportGauge({ speed, max, width, pal, unit, over
   const ticks = useMemo(() => dialTicks(cx, cy, R - 2, a0, sw, max, [5, 3.4, 2]), [cx, cy, R, a0, sw, max]);
   const step = numEvery(max);
   // küçük saat (alt boşlukta)
-  const d = new Date(now ?? SHOW_TIME);
-  const mins = d.getMinutes() + d.getSeconds() / 60;
-  const hrs = (d.getHours() % 12) + mins / 60;
   const ccx = cx;
   const ccy = cy + 29.5;
   const cr = 7.2;
-  const hand = (deg: number, len: number) => {
-    const [x, y] = pt(ccx, ccy, len, deg - 90);
-    return `M${ccx} ${ccy}L${f2(x)} ${f2(y)}`;
-  };
   return (
     <Shell width={width} height={h} center={center} pal={pal}>
       <Svg width={width} height={h} viewBox="0 0 100 88">
@@ -519,8 +563,7 @@ const SportGauge = memo(function SportGauge({ speed, max, width, pal, unit, over
           const [x2, y2] = pt(ccx, ccy, cr - (i % 3 === 0 ? 2 : 1.2), i * 30 - 90);
           return <Path key={i} d={`M${f2(x1)} ${f2(y1)}L${f2(x2)} ${f2(y2)}`} stroke={pal.text} strokeWidth={i % 3 === 0 ? 0.6 : 0.35} />;
         })}
-        <Path d={hand(hrs * 30, 3.6)} stroke={pal.text} strokeWidth={0.8} strokeLinecap="round" />
-        <Path d={hand(mins * 6, 5.6)} stroke={pal.text} strokeWidth={0.5} strokeLinecap="round" />
+        <ClockHands cx={ccx} cy={ccy} hourLen={3.6} minLen={5.6} hourW={0.8} minW={0.5} color={pal.text} fixed={now} />
         <Circle cx={ccx} cy={ccy} r={0.7} fill={pal.text} />
         <Path d={`M${cx - R + 4} ${cy - 8} A${R} ${R} 0 0 1 ${cx + R - 10} ${cy - 30} Q${cx} ${cy - 22} ${cx - R + 4} ${cy - 8} Z`} fill={`url(#${id}g)`} />
       </Svg>
@@ -622,6 +665,8 @@ const VFD_SEGS = Array.from({ length: VF.n }, (_, i) => {
   return `M${p.map((q) => `${f2(q[0])} ${f2(q[1])}`).join('L')}Z`;
 });
 
+const VF_HOT = Math.ceil(VF.n * 0.8);
+
 const VfdGauge = memo(function VfdGauge({ speed, max, width, pal, unit, over, reduced, center, odo }: GaugeProps) {
   const h = width * GAUGE_ASPECT.vfd;
   const id = useGid();
@@ -641,11 +686,10 @@ const VfdGauge = memo(function VfdGauge({ speed, max, width, pal, unit, over, re
           </LinearGradient>
         </Defs>
         <Rect x={0.6} y={0.6} width={98.8} height={64.8} rx={5} fill={pal.face} stroke={alpha(pal.chrome, 0.9)} strokeWidth={0.8} />
-        {VFD_SEGS.map((d, i) => {
-          const on = i < lit;
-          const hot = i / VF.n >= 0.8;
-          return <Path key={i} d={d} fill={on ? (over ? pal.danger : hot ? pal.secondary : pal.text) : ghost} />;
-        })}
+        {/* segmentler renk gruplarına göre tek yolda (42 ayrı öğe yerine 3) */}
+        <Path d={VFD_SEGS.slice(lit).join('')} fill={ghost} />
+        <Path d={VFD_SEGS.slice(0, Math.min(lit, VF_HOT)).join('')} fill={over ? pal.danger : pal.text} />
+        {lit > VF_HOT ? <Path d={VFD_SEGS.slice(VF_HOT, lit).join('')} fill={over ? pal.danger : pal.secondary} /> : null}
         {Array.from({ length: Math.floor(max / step) }, (_, i) => (i + 1) * step).map((v) => {
           const [x, y] = pt(VF.cx, VF.cy, VF.r2 + 3.6, VF.a0 + (VF.sw * v) / max);
           return <DialNum key={v} text={String(v)} x={x} y={y} h={2.8} color={alpha(pal.text, 0.7)} style="seg" />;
@@ -676,6 +720,9 @@ const VfdGauge = memo(function VfdGauge({ speed, max, width, pal, unit, over, re
 //    5×7 nokta vuruşlu amber rakamlar (tabela ampulü gibi), yolculuk maksimumunda halka işaret
 // ---------------------------------------------------------------------------
 const LV = { cx: 50, cy: 64, a0: 220, sw: 100, rays: 21, radii: [35, 39, 43, 47, 51] };
+/** Daireyi yol olarak yazar (çok sayıda nokta tek bir Path öğesinde birleşsin diye) */
+const dot = (x: number, y: number, r: number) => `M${f2(x - r)} ${f2(y)}a${r} ${r} 0 1 0 ${f2(2 * r)} 0a${r} ${r} 0 1 0 ${f2(-2 * r)} 0`;
+
 /** 5×7 nokta vuruşlu rakamlar */
 const DOT5x7: Record<string, string[]> = {
   '0': ['01110', '10001', '10011', '10101', '11001', '10001', '01110'],
@@ -729,16 +776,46 @@ const LedGauge = memo(function LedGauge({ speed, max, width, pal, unit, over, re
   const blockW = txt.length * digW - P; // son basamaktan sonra boşluk yok
   const x0 = LV.cx - blockW / 2 + P / 2;
   const y0 = 41.6 - 3 * P;
-  const dotsOn: { x: number; y: number }[] = [];
-  const dotsOff: { x: number; y: number }[] = [];
-  [...txt].forEach((ch, di) => {
-    const rows = DOT5x7[ch] ?? DOT5x7[' '];
-    rows.forEach((row, ry) =>
-      [...row].forEach((c, rx) => (c === '1' ? dotsOn : dotsOff).push({ x: x0 + di * digW + rx * P, y: y0 + ry * P })),
-    );
-  });
-  const d = new Date(now ?? SHOW_TIME);
-  const clock = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  const digits = useMemo(() => {
+    const on: string[] = [];
+    const glow: string[] = [];
+    const off: string[] = [];
+    [...txt].forEach((ch, di) => {
+      const rows = DOT5x7[ch] ?? DOT5x7[' '];
+      rows.forEach((row, ry) =>
+        [...row].forEach((c, rx) => {
+          const x = x0 + di * digW + rx * P;
+          const y = y0 + ry * P;
+          if (c === '1') {
+            on.push(dot(x, y, 0.8));
+            glow.push(dot(x, y, 1.4));
+          } else off.push(dot(x, y, 0.75));
+        }),
+      );
+    });
+    return { core: on.join(''), on: glow.join(''), off: off.join('') };
+  }, [txt, x0, digW, P, y0]);
+  const fan = useMemo(() => {
+    const groups = new Map<string, { d: string[]; fill: string; opacity: number }>();
+    const add = (key: string, fill: string, opacity: number, d: string) => {
+      let g = groups.get(key);
+      if (!g) groups.set(key, (g = { d: [], fill, opacity }));
+      g.d.push(d);
+    };
+    LV_DOTS.forEach((ray, i) => {
+      const on = i <= lit;
+      const near = on ? Math.max(0, 1 - (pos - i) / 3) : 0;
+      ray.forEach(([x, y], j) => {
+        if (near > 0.3) add(`g${i}`, amber, 0.22 * near, dot(x, y, 1.9));
+        if (!on) add('off', unlit, 1, dot(x, y, 0.95));
+        else {
+          const c = mix(amber, hot, near * (0.4 + j * 0.12));
+          add(c, c, 1, dot(x, y, 0.95));
+        }
+      });
+    });
+    return [...groups.entries()].map(([key, g]) => ({ key, d: g.d.join(''), fill: g.fill, opacity: g.opacity }));
+  }, [lit, pos, amber, hot, unlit]);
   return (
     <Shell width={width} height={h} center={center} pal={pal}>
       <Svg width={width} height={h} viewBox="0 0 100 70" style={StyleSheet.absoluteFill}>
@@ -748,19 +825,10 @@ const LedGauge = memo(function LedGauge({ speed, max, width, pal, unit, over, re
         <Path d={arc(LV.cx, LV.cy, 59, 212, 328)} stroke={mix(pal.chrome, '#FFFFFF', 0.5)} strokeWidth={1.1} fill="none" />
         <Path d={arc(LV.cx, LV.cy, 57.8, 212, 328)} stroke={shade(pal.chrome, 0.55)} strokeWidth={0.8} fill="none" />
         {/* LED ışın yelpazesi: ibreye yakın ışınlar daha sıcak (kuyruklu yıldız) */}
-        {LV_DOTS.map((ray, i) => {
-          const on = i <= lit;
-          const near = on ? Math.max(0, 1 - (pos - i) / 3) : 0;
-          return ray.map(([x, y], j) => {
-            const c = on ? mix(amber, hot, near * (0.4 + j * 0.12)) : unlit;
-            return (
-              <G key={`${i}-${j}`}>
-                {near > 0.3 ? <Circle cx={x} cy={y} r={1.9} fill={amber} opacity={0.22 * near} /> : null}
-                <Circle cx={x} cy={y} r={0.95} fill={c} />
-              </G>
-            );
-          });
-        })}
+        {/* LED ışın yelpazesi: aynı renkteki noktalar tek yolda; ibreye yakın ışınlar daha sıcak (kuyruklu yıldız) */}
+        {fan.map((g) => (
+          <Path key={g.key} d={g.d} fill={g.fill} opacity={g.opacity} />
+        ))}
         {/* yolculuk maksimumu: en dış noktada halka */}
         {peakRay >= 0 ? <Circle cx={LV_DOTS[peakRay][4][0]} cy={LV_DOTS[peakRay][4][1]} r={1.9} stroke={pal.holo} strokeWidth={0.4} fill="none" /> : null}
         {[0, 5, 10, 15, 20].map((i) => {
@@ -777,15 +845,9 @@ const LedGauge = memo(function LedGauge({ speed, max, width, pal, unit, over, re
           {unit}
         </Label>
         {/* 5×7 nokta vuruşlu hız */}
-        {dotsOff.map((p, i) => (
-          <Circle key={`o${i}`} cx={p.x} cy={p.y} r={0.75} fill={unlit} opacity={0.55} />
-        ))}
-        {dotsOn.map((p, i) => (
-          <Circle key={`g${i}`} cx={p.x} cy={p.y} r={1.4} fill={amber} opacity={0.25} />
-        ))}
-        {dotsOn.map((p, i) => (
-          <Circle key={`n${i}`} cx={p.x} cy={p.y} r={0.8} fill={mix(amber, hot, 0.35)} />
-        ))}
+        <Path d={digits.off} fill={unlit} opacity={0.55} />
+        <Path d={digits.on} fill={amber} opacity={0.25} />
+        <Path d={digits.core} fill={mix(amber, hot, 0.35)} />
         {/* isim plakası */}
         <Rect x={2} y={52.5} width={96} height={16} rx={2} fill={shade(pal.face, 0.6)} />
         <Path d="M2 52.5 H98" stroke={pal.chrome} strokeWidth={0.5} />
@@ -794,7 +856,7 @@ const LedGauge = memo(function LedGauge({ speed, max, width, pal, unit, over, re
           TRIP
         </Label>
         <DialNum text={odo ?? '--'} x={20} y={63.4} h={4.2} color={pal.text} style="flat" />
-        <DialNum text={clock} x={84} y={61.2} h={4.2} color={pal.text} style="flat" />
+        <DigiClock x={84} y={61.2} h={4.2} color={pal.text} fixed={now} />
         {[0, 1, 2, 3].map((i) => (
           <Circle key={i} cx={80 + i * 2.6} cy={66.2} r={0.7} fill={i < sigLevel ? pal.text : unlit} />
         ))}
@@ -1039,13 +1101,6 @@ const BandGauge = memo(function BandGauge({ speed, max, width, pal, unit, over, 
     return a.join('');
   }, [max, span]);
   const bandStyle = useAnimatedStyle(() => ({ width: span * k * f.value }));
-  const d = new Date(now ?? SHOW_TIME);
-  const mins = d.getMinutes() + d.getSeconds() / 60;
-  const hrs = (d.getHours() % 12) + mins / 60;
-  const hand = (deg: number, len: number) => {
-    const [x, y] = pt(26, 35.5, len, deg - 90);
-    return `M26 35.5L${f2(x)} ${f2(y)}`;
-  };
   return (
     <Shell width={width} height={h} center={center} pal={pal}>
       <Svg width={width} height={h} viewBox="0 0 100 46" style={StyleSheet.absoluteFill}>
@@ -1069,8 +1124,7 @@ const BandGauge = memo(function BandGauge({ speed, max, width, pal, unit, over, 
           const [x2, y2] = pt(26, 35.5, i % 3 === 0 ? 4.6 : 5.3, i * 30 - 90);
           return <Path key={i} d={`M${f2(x1)} ${f2(y1)}L${f2(x2)} ${f2(y2)}`} stroke={pal.text} strokeWidth={i % 3 === 0 ? 0.6 : 0.35} />;
         })}
-        <Path d={hand(hrs * 30, 3.4)} stroke={pal.text} strokeWidth={0.8} strokeLinecap="round" />
-        <Path d={hand(mins * 6, 5.2)} stroke={pal.text} strokeWidth={0.5} strokeLinecap="round" />
+        <ClockHands cx={26} cy={35.5} hourLen={3.4} minLen={5.2} hourW={0.8} minW={0.5} color={pal.text} fixed={now} />
         <Odo x={assist ? 58 : 66} y={35.5} h={4.2} text={odo} pal={pal} />
         {assist ? <DigiWin x={84} y={35.5} h={5.4} value={shown} pal={pal} over={over} /> : null}
         <Rect x={5.2} y={5.2} width={89.6} height={8} fill={`url(#${id}g)`} />

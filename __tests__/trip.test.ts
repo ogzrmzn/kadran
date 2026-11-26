@@ -59,3 +59,45 @@ describe('HUD hız sıfıra düşmesin', () => {
     expect(t.speedKmh).toBe(0);
   });
 });
+
+describe('Sürüşte kararlı hız', () => {
+  // ~70 km/sa sabit sürüş, konumda ±4 m gürültü, cihaz hızı yok (tarayıcı GPS'i gibi)
+  const noisyTrace = (n: number) => {
+    let seed = 11;
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647 - 0.5) * 2;
+    const pts = [];
+    for (let i = 0; i <= n; i++) pts.push({ lat: 41 + (i * 70) / 3.6 / 111320 + (rnd() * 4) / 111320, lon: 29 + (rnd() * 4) / 84000, time: i * 1000, speed: null, heading: null, accuracy: 8 });
+    return pts;
+  };
+  it('gürültülü konumdan hesaplanan hız süzülür: titreme ham ölçümün yarısından az', () => {
+    let t = newTrip(0);
+    const shown: number[] = [];
+    let raw: number[] = [];
+    const pts = noisyTrace(40);
+    pts.forEach((p, i) => {
+      t = addPoint(t, p);
+      if (i > 10) shown.push(t.speedKmh);
+      if (i > 10) raw.push((distanceM(pts[i - 1], p) / 1) * 3.6);
+    });
+    const sd = (a: number[]) => {
+      const m = a.reduce((x, y) => x + y, 0) / a.length;
+      return Math.sqrt(a.reduce((x, y) => x + (y - m) ** 2, 0) / a.length);
+    };
+    expect(sd(shown)).toBeLessThan(sd(raw) * 0.5);
+    const mean = shown.reduce((x, y) => x + y, 0) / shown.length;
+    expect(Math.abs(mean - 70)).toBeLessThan(5);
+    raw = [];
+  });
+  it('tek bir hatalı sıçrama (70 → 180) göstergeyi uçurmaz', () => {
+    let t = newTrip(0);
+    for (let i = 0; i <= 5; i++) t = addPoint(t, { lat: 41 + i * 0.000175, lon: 29, time: i * 1000, speed: 70 / 3.6, heading: 0, accuracy: 5 });
+    t = addPoint(t, { lat: 41 + 6 * 0.000175, lon: 29, time: 6000, speed: 180 / 3.6, heading: 0, accuracy: 5 });
+    expect(t.speedKmh).toBeLessThan(70 + 25 + 1);
+  });
+  it('kötü doğruluklu ölçümün cihaz hızı kullanılmaz', () => {
+    let t = newTrip(0);
+    t = addPoint(t, { lat: 41, lon: 29, time: 0, speed: 60 / 3.6, heading: 0, accuracy: 5 });
+    t = addPoint(t, { lat: 41.0002, lon: 29, time: 1000, speed: 150 / 3.6, heading: 0, accuracy: 400 });
+    expect(Math.round(t.speedKmh)).toBe(60);
+  });
+});

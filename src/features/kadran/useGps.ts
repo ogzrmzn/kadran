@@ -17,8 +17,10 @@ export type GpsStatus =
   | 'kayip' // daha önce bağlıydı, sinyal kesildi
   | 'demo';
 
-/** Bu süre konum gelmezse sinyal kayıp sayılır */
-export const LOST_AFTER_MS = 6000;
+/** Bu süre konum gelmezse sinyal kayıp sayılır (tarayıcı GPS'i arada 2–4 sn boşluk bırakabilir) */
+export const LOST_AFTER_MS = 8000;
+/** Doğruluk ancak bu süre boyunca kötü kalırsa "zayıf sinyal" sayılır (tek kötü ölçüm göstergeyi düşürmez) */
+export const WEAK_AFTER_MS = 3000;
 /** Bundan kötü doğrulukta hız gösterilmez */
 export const MAX_SPEED_ACCURACY_M = 50;
 /** Cihaz hızı kendisi ölçüyorsa (Doppler) konum doğruluğu bundan kötü olmadıkça hız gösterilir */
@@ -36,12 +38,20 @@ export function confirmMax(s: ConfirmedMax, shown: number): ConfirmedMax {
   return { prev: shown, max: Math.max(s.max, Math.min(s.prev, shown)) };
 }
 
-/** Durum + son konum zamanı + doğruluk → gösterilecek durum (saf; test edilebilir) */
-export function deriveStatus(base: GpsStatus, lastFixAt: number | null, accuracy: number | null, now: number, deviceSpeed = false): GpsStatus {
+/** Bu doğruluk hız için yetersiz mi? */
+export function badAccuracy(accuracy: number | null, deviceSpeed: boolean): boolean {
+  return accuracy != null && accuracy > (deviceSpeed ? MAX_DEVICE_SPEED_ACCURACY_M : MAX_SPEED_ACCURACY_M);
+}
+
+/**
+ * Durum + son konum zamanı + doğruluk → gösterilecek durum (saf; test edilebilir).
+ * badSince verilirse doğruluk ancak WEAK_AFTER_MS boyunca kötü kalınca "zayıf" olur.
+ */
+export function deriveStatus(base: GpsStatus, lastFixAt: number | null, accuracy: number | null, now: number, deviceSpeed = false, badSince?: number | null): GpsStatus {
   if (base !== 'bagli') return base;
   if (lastFixAt == null) return 'araniyor';
   if (now - lastFixAt > LOST_AFTER_MS) return 'kayip';
-  if (accuracy != null && accuracy > (deviceSpeed ? MAX_DEVICE_SPEED_ACCURACY_M : MAX_SPEED_ACCURACY_M)) return 'zayif';
+  if (badAccuracy(accuracy, deviceSpeed) && (badSince === undefined || (badSince != null && now - badSince >= WEAK_AFTER_MS))) return 'zayif';
   return 'bagli';
 }
 
@@ -76,7 +86,7 @@ export function useGps({ demo, compass, tickMs = 1000 }: { demo: boolean; compas
   const [base, setBase] = useState<GpsStatus>(demo ? 'demo' : 'izin');
   const [state, setState] = useState<{ trip: Trip; cmax: ConfirmedMax }>(() => ({ trip: newTrip(Date.now()), cmax: { prev: 0, max: 0 } }));
   const { trip, cmax } = state;
-  const [fix, setFix] = useState<{ at: number | null; accuracy: number | null; rawSpeed: number | null }>({ at: null, accuracy: null, rawSpeed: null });
+  const [fix, setFix] = useState<{ at: number | null; accuracy: number | null; rawSpeed: number | null; badSince: number | null }>({ at: null, accuracy: null, rawSpeed: null, badSince: null });
   const [compassDeg, setCompassDeg] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [attempt, setAttempt] = useState(0);
@@ -88,7 +98,10 @@ export function useGps({ demo, compass, tickMs = 1000 }: { demo: boolean; compas
       const next = addPoint(s.trip, p);
       return { trip: next, cmax: confirmMax(s.cmax, next.speedKmh) };
     });
-    setFix({ at: Date.now(), accuracy: p.accuracy, rawSpeed: p.speed != null && p.speed >= 0 ? p.speed : null });
+    const t = Date.now();
+    const raw = p.speed != null && p.speed >= 0 ? p.speed : null;
+    const bad = badAccuracy(p.accuracy, raw != null);
+    setFix((f) => ({ at: t, accuracy: p.accuracy, rawSpeed: raw, badSince: bad ? (f.badSince ?? t) : null }));
   }, []);
 
   // Uygulama arka plandayken GPS'i bırak (pil)
@@ -220,7 +233,7 @@ export function useGps({ demo, compass, tickMs = 1000 }: { demo: boolean; compas
     };
   }, [compass, demo, active, base]);
 
-  const status = deriveStatus(base, fix.at, fix.accuracy, now, fix.rawSpeed != null);
+  const status = deriveStatus(base, fix.at, fix.accuracy, now, fix.rawSpeed != null, fix.badSince);
   const reliable = status === 'bagli' || status === 'demo';
   const moving = trip.speedKmh >= 5;
   const heading = moving && trip.heading != null ? trip.heading : (compassDeg ?? trip.heading);

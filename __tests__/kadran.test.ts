@@ -160,3 +160,13 @@ describe('Menü paleti', () => {
     expect(uiPalette().primary).toBe(APP_AMBER);
   });
 });
+
+describe('Zayıf sinyal gecikmesi', () => {
+  it('tek kötü ölçüm hemen "zayıf" yapmaz; 3 sn sürerse yapar', () => {
+    const { WEAK_AFTER_MS } = jest.requireActual('@/features/kadran/useGps');
+    expect(deriveStatus('bagli', 1000, 80, 1000, false, 1000)).toBe('bagli');
+    expect(deriveStatus('bagli', 3500, 80, 3500, false, 1000)).toBe('bagli');
+    expect(deriveStatus('bagli', 4000, 80, 1000 + WEAK_AFTER_MS, false, 1000)).toBe('zayif');
+    expect(deriveStatus('bagli', 4000, 8, 4000, false, null)).toBe('bagli');
+  });
+});
