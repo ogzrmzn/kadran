@@ -189,16 +189,17 @@ export const THEMES: Record<ThemeId, ClassicTheme> = {
   },
   led: {
     id: 'led',
-    name: 'LED 79',
-    era: "1970'LER SONU · LED",
-    tagline: 'Dik, düz kırmızı LED rakamlar · yatay LED merdiven · füme cam',
+    name: 'LED VU',
+    era: "70'LER HI-FI × LED IŞIK SANATI",
+    tagline: 'VU metre ibresi · LED ışın yelpazesi · ampul gibi yanan 5×7 nokta rakamlar · sönen hayalet iz',
     gauge: 'led',
     fascia: 'glass',
     glyph: 'flat',
-    maxKmh: 240,
-    maxMph: 150,
-    day: { ...base, bg: '#0A0505', face: '#050202', text: '#FF3B2F', needle: '#FF3B2F', chrome: '#3A2626', primary: '#FF4A3A', secondary: '#FFB23E', holo: '#FF3B2F', dim: '#7A3A34', glass: 'rgba(255,59,47,0.06)' },
-    night: { ...base, bg: '#040202', face: '#020101', text: '#D92A20', needle: '#D92A20', chrome: '#241717', primary: '#D93A2C', secondary: '#C98A2A', holo: '#D92A20', dim: '#55241F', glass: 'rgba(217,42,32,0.05)' },
+    maxKmh: 200,
+    maxMph: 120,
+    // text = yanan LED (amber), secondary = en sıcak LED, dim = sönük LED, needle = krem ibre, holo = kırmızı ibre ucu
+    day: { ...base, bg: '#0C0806', face: '#120C08', text: '#FFB547', needle: '#F4E3B5', chrome: '#D9DDE2', primary: '#FFB547', secondary: '#FFF4D6', holo: '#E0342B', dim: '#3A2614', glass: 'rgba(255,181,71,0.06)' },
+    night: { ...base, bg: '#060403', face: '#0A0705', text: '#E89A30', needle: '#D8C79A', chrome: '#6A6660', primary: '#E89A30', secondary: '#FFE2A8', holo: '#C42A22', dim: '#2E1E10', glass: 'rgba(232,154,48,0.05)' },
   },
 };
 

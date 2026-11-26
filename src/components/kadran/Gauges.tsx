@@ -44,7 +44,7 @@ export interface GaugeProps {
 }
 
 /** Göstergenin yükseklik/genişlik oranı */
-export const GAUGE_ASPECT: Record<GaugeKind, number> = { twin: 0.5, ribbon: 0.48, sport: 0.88, drum: 0.52, vfd: 0.66, led: 0.52, arcband: 0.46, chev: 0.64, band: 0.46 };
+export const GAUGE_ASPECT: Record<GaugeKind, number> = { twin: 0.5, ribbon: 0.48, sport: 0.88, drum: 0.52, vfd: 0.66, led: 0.7, arcband: 0.46, chev: 0.64, band: 0.46 };
 
 const D2R = Math.PI / 180;
 const pt = (cx: number, cy: number, r: number, deg: number) => [cx + r * Math.cos(deg * D2R), cy + r * Math.sin(deg * D2R)] as const;
@@ -671,49 +671,141 @@ const VfdGauge = memo(function VfdGauge({ speed, max, width, pal, unit, over, re
 });
 
 // ---------------------------------------------------------------------------
-// 6) LED 79 — dik, düz kırmızı LED rakamlar + yatay LED merdiven
+// 6) LED VU — 70'ler hi-fi VU metresi + LED ışık sanatı (iki ayrı tasarım önerisinin karışımı):
+//    krom at nalı çerçeve, LED ışın yelpazesi, gerçek analog ibre ve arkasında sönen hayalet izler,
+//    5×7 nokta vuruşlu amber rakamlar (tabela ampulü gibi), yolculuk maksimumunda halka işaret
 // ---------------------------------------------------------------------------
-const LED_N = 30;
+const LV = { cx: 50, cy: 64, a0: 220, sw: 100, rays: 21, radii: [32, 36, 40, 44, 48] };
+/** 5×7 nokta vuruşlu rakamlar */
+const DOT5x7: Record<string, string[]> = {
+  '0': ['01110', '10001', '10011', '10101', '11001', '10001', '01110'],
+  '1': ['00100', '01100', '00100', '00100', '00100', '00100', '01110'],
+  '2': ['01110', '10001', '00001', '00010', '00100', '01000', '11111'],
+  '3': ['11111', '00010', '00100', '00010', '00001', '10001', '01110'],
+  '4': ['00010', '00110', '01010', '10010', '11111', '00010', '00010'],
+  '5': ['11111', '10000', '11110', '00001', '00001', '10001', '01110'],
+  '6': ['00110', '01000', '10000', '11110', '10001', '10001', '01110'],
+  '7': ['11111', '00001', '00010', '00100', '01000', '01000', '01000'],
+  '8': ['01110', '10001', '10001', '01110', '10001', '10001', '01110'],
+  '9': ['01110', '10001', '10001', '01111', '00001', '00010', '01100'],
+  '-': ['00000', '00000', '00000', '11111', '00000', '00000', '00000'],
+  ' ': ['00000', '00000', '00000', '00000', '00000', '00000', '00000'],
+};
+const LV_DOTS = Array.from({ length: LV.rays }, (_, i) => {
+  const a = LV.a0 + (LV.sw * i) / (LV.rays - 1);
+  return LV.radii.map((r) => pt(LV.cx, LV.cy, r, a));
+});
 
-const LedGauge = memo(function LedGauge({ speed, max, width, pal, glyph, unit, over, reduced, center, odo }: GaugeProps) {
-  const h = width * GAUGE_ASPECT.led;
-  const id = useGid();
-  const shown = useTweenedSpeed(speed, reduced);
-  const lit = shown == null ? 0 : Math.round(Math.min(1, shown / max) * LED_N);
-  const ghost = alpha(pal.text, 0.09);
-  const txt = shown == null ? '--' : String(shown);
-  const bars = useMemo(
-    () =>
-      Array.from({ length: LED_N }, (_, i) => {
-        const x = 8 + i * (84 / LED_N);
-        const bh = 2.5 + (i / LED_N) * 8.5;
-        return { x, y: 47 - bh, w: 84 / LED_N - 0.9, h: bh };
-      }),
-    [],
+/** İbre (pivot çevresinde döner; yalnızca r1..r2 arası çizilir: rakamların üstünden geçmez) */
+function VuNeedle({ f, k, delta = 0, opacity = 1, color, tip }: { f: SharedValue<number>; k: number; delta?: number; opacity?: number; color: string; tip: string }) {
+  const L = 51;
+  const style = useAnimatedStyle(() => ({ transform: [{ rotate: `${LV.a0 + LV.sw * Math.max(0, Math.min(1.01, f.value - delta))}deg` }] }));
+  return (
+    <Animated.View pointerEvents="none" style={[{ position: 'absolute', left: (LV.cx - L) * k, top: (LV.cy - L) * k, width: 2 * L * k, height: 2 * L * k, opacity }, style]}>
+      <Svg width={2 * L * k} height={2 * L * k} viewBox={`${-L} ${-L} ${2 * L} ${2 * L}`}>
+        <Path d="M29.5 -0.45 L44 -0.3 L44 0.3 L29.5 0.45 Z" fill={color} />
+        <Path d="M44 -0.3 L50 -0.18 L50 0.18 L44 0.3 Z" fill={tip} />
+      </Svg>
+    </Animated.View>
   );
+}
+
+const LedGauge = memo(function LedGauge({ speed, max, width, pal, unit, over, reduced, center, odo, now, sigLevel = 4, peak }: GaugeProps) {
+  const h = width * GAUGE_ASPECT.led;
+  const k = width / 100;
+  const id = useGid();
+  const f = useNeedle(speed, max, reduced);
+  const shown = useTweenedSpeed(speed, reduced);
+  const pos = shown == null ? -1 : (Math.min(1, shown / max) * (LV.rays - 1));
+  const lit = pos < 0 ? -1 : Math.round(pos);
+  const peakRay = peak != null && peak > 0 ? Math.round(Math.min(1, peak / max) * (LV.rays - 1)) : -1;
+  const amber = over ? pal.danger : pal.text;
+  const hot = over ? '#FFD0C8' : pal.secondary;
+  const unlit = pal.dim;
+  // 5×7 rakamlar
+  const txt = (shown == null ? '--' : String(shown)).padStart(3, ' ').slice(-3);
+  const P = 1.8;
+  const digW = 5 * P + 1.8;
+  const x0 = LV.cx - (3 * digW - 1.8) / 2 + P / 2;
+  const y0 = 37.4;
+  const dotsOn: { x: number; y: number }[] = [];
+  const dotsOff: { x: number; y: number }[] = [];
+  [...txt].forEach((ch, di) => {
+    const rows = DOT5x7[ch] ?? DOT5x7[' '];
+    rows.forEach((row, ry) =>
+      [...row].forEach((c, rx) => (c === '1' ? dotsOn : dotsOff).push({ x: x0 + di * digW + rx * P, y: y0 + ry * P })),
+    );
+  });
+  const d = new Date(now ?? SHOW_TIME);
+  const clock = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   return (
     <Shell width={width} height={h} center={center} pal={pal}>
-      <Svg width={width} height={h} viewBox="0 0 100 52">
-        <Defs>
-          <LinearGradient id={`${id}s`} x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor="#FFFFFF" stopOpacity={0.08} />
-            <Stop offset="0.35" stopColor="#FFFFFF" stopOpacity={0} />
-          </LinearGradient>
-        </Defs>
-        <Rect x={0.6} y={0.6} width={98.8} height={50.8} rx={3} fill={pal.face} stroke={alpha(pal.chrome, 0.9)} strokeWidth={0.8} />
-        <DialNum text={txt.padStart(3, ' ')} x={46} y={18} h={24} color={over ? pal.secondary : pal.text} style={glyph} ghost={ghost} />
-        <Label x={86} y={14} size={3.2} color={pal.text} spacing={1}>
+      <Svg width={width} height={h} viewBox="0 0 100 70" style={StyleSheet.absoluteFill}>
+        <ChromeDefs id={id} pal={pal} />
+        <Rect x={0.5} y={0.5} width={99} height={69} rx={5} fill={pal.face} stroke={alpha(pal.chrome, 0.5)} strokeWidth={0.5} />
+        {/* krom at nalı */}
+        <Path d={arc(LV.cx, LV.cy, 56.5, 208, 332)} stroke={mix(pal.chrome, '#FFFFFF', 0.5)} strokeWidth={1.1} fill="none" />
+        <Path d={arc(LV.cx, LV.cy, 55.2, 208, 332)} stroke={shade(pal.chrome, 0.55)} strokeWidth={0.8} fill="none" />
+        {/* LED ışın yelpazesi: ibreye yakın ışınlar daha sıcak (kuyruklu yıldız) */}
+        {LV_DOTS.map((ray, i) => {
+          const on = i <= lit;
+          const near = on ? Math.max(0, 1 - (pos - i) / 3) : 0;
+          return ray.map(([x, y], j) => {
+            const c = on ? mix(amber, hot, near * (0.4 + j * 0.12)) : unlit;
+            return (
+              <G key={`${i}-${j}`}>
+                {near > 0.3 ? <Circle cx={x} cy={y} r={1.9} fill={amber} opacity={0.22 * near} /> : null}
+                <Circle cx={x} cy={y} r={0.95} fill={c} />
+              </G>
+            );
+          });
+        })}
+        {/* yolculuk maksimumu: en dış noktada halka */}
+        {peakRay >= 0 ? <Circle cx={LV_DOTS[peakRay][4][0]} cy={LV_DOTS[peakRay][4][1]} r={1.9} stroke={pal.holo} strokeWidth={0.4} fill="none" /> : null}
+        {[0, 5, 10, 15, 20].map((i) => {
+          const [x, y] = pt(LV.cx, LV.cy, 52.2, LV.a0 + (LV.sw * i) / (LV.rays - 1));
+          return <DialNum key={i} text={String(Math.round((max * i) / 20))} x={x} y={y} h={2.6} color={alpha(pal.text, 0.75)} style="classic" cond={0.8} />;
+        })}
+        {/* hız uyarı lambası */}
+        <Circle cx={91} cy={9} r={1.6} fill={over ? pal.danger : unlit} />
+        {over ? <Circle cx={91} cy={9} r={3.2} fill={pal.danger} opacity={0.25} /> : null}
+        <Label x={91} y={14.2} size={1.9} color={alpha(pal.text, 0.6)}>
+          LİMİT
+        </Label>
+        <Label x={9} y={10} size={1.9} color={alpha(pal.text, 0.6)}>
           {unit}
         </Label>
-        <DialNum text={odo ?? '--'} x={86} y={24} h={3.8} color={alpha(pal.text, 0.8)} style={glyph} />
-        <Label x={86} y={30.5} size={2.2} color={alpha(pal.text, 0.6)} spacing={0.8}>
+        {/* 5×7 nokta vuruşlu hız */}
+        {dotsOff.map((p, i) => (
+          <Circle key={`o${i}`} cx={p.x} cy={p.y} r={0.68} fill={unlit} opacity={0.55} />
+        ))}
+        {dotsOn.map((p, i) => (
+          <Circle key={`g${i}`} cx={p.x} cy={p.y} r={1.25} fill={amber} opacity={0.25} />
+        ))}
+        {dotsOn.map((p, i) => (
+          <Circle key={`n${i}`} cx={p.x} cy={p.y} r={0.72} fill={mix(amber, hot, 0.35)} />
+        ))}
+        {/* isim plakası */}
+        <Rect x={2} y={52.5} width={96} height={16} rx={2} fill={shade(pal.face, 0.6)} />
+        <Path d="M2 52.5 H98" stroke={pal.chrome} strokeWidth={0.5} />
+        <Path d={`M${LV.cx - 4.5} 52.6 A4.5 4.5 0 0 1 ${LV.cx + 4.5} 52.6 Z`} fill={`url(#${id}c)`} />
+        <Label x={6} y={60} size={2.2} color={alpha(pal.text, 0.6)} anchor="start" spacing={0.6}>
           TRIP
         </Label>
-        {bars.map((b, i) => (
-          <Rect key={i} x={b.x} y={b.y} width={b.w} height={b.h} fill={i < lit ? (over ? pal.secondary : pal.text) : ghost} />
+        <DialNum text={odo ?? '--'} x={20} y={63.4} h={4.2} color={pal.text} style="flat" />
+        <DialNum text={clock} x={84} y={61.2} h={4.2} color={pal.text} style="flat" />
+        {[0, 1, 2, 3].map((i) => (
+          <Circle key={i} cx={80 + i * 2.6} cy={66.2} r={0.7} fill={i < sigLevel ? pal.text : unlit} />
         ))}
-        <Rect x={0.6} y={0.6} width={98.8} height={50.8} rx={3} fill={`url(#${id}s)`} />
+        <Label x={LV.cx} y={63.6} size={2} color={alpha(pal.text, 0.5)} spacing={1.4}>
+          LED · VU
+        </Label>
       </Svg>
+      {/* sönen hayalet izler + ibre */}
+      {reduced ? null : <VuNeedle f={f} k={k} delta={0.045} opacity={0.1} color={pal.needle} tip={pal.holo} />}
+      {reduced ? null : <VuNeedle f={f} k={k} delta={0.03} opacity={0.22} color={pal.needle} tip={pal.holo} />}
+      {reduced ? null : <VuNeedle f={f} k={k} delta={0.015} opacity={0.45} color={pal.needle} tip={pal.holo} />}
+      <VuNeedle f={f} k={k} color={over ? pal.danger : pal.needle} tip={pal.holo} />
     </Shell>
   );
 });

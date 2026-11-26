@@ -16,7 +16,7 @@ Nexus HUD ile aynı ekran düzenini kullanır ama ondan tamamen bağımsız bir 
 | Ceviz Roadster | 1960'lar İngiliz spor | Büyük siyah kadran, krom çerçeve, küçük saat, ceviz panel |
 | Tambur | 1970'ler Fransız | Büyüteç penceresinde dönen rakam tamburu |
 | Dijital 85 | 1980'ler | Yeşil vakum floresan, segment rakam, yay çubuk grafik |
-| LED 79 | 1970'ler sonu | Dik, düz kırmızı LED rakamlar, yatay LED merdiven |
+| LED VU | 70'ler hi-fi × LED | VU metre ibresi, LED ışın yelpazesi, 5×7 nokta vuruşlu amber rakamlar, sönen hayalet iz |
 | Cam HUD | — | Ön cama yansıtma, ayna görüntü, kalın amber rakamlar |
 
 Tasarımlar dönemlerden esinlenmiş özgün çizimlerdir; marka amblemi kullanılmaz.
