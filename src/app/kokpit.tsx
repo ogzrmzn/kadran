@@ -11,7 +11,7 @@ import { DimOverlay, HudDrawer } from '@/components/kadran/HudDrawer';
 import { HudHeader } from '@/components/kadran/HudHeader';
 import { DataCell, HudButton, KdIcon, KdLabel } from '@/components/kadran/primitives';
 import { avgKmh } from '@/features/kadran/trip';
-import { clockDuration, distanceText, distUnitLabel, toUnit, unitLabel } from '@/features/kadran/format';
+import { clockDuration, distanceText, distUnitLabel, signalBars, toUnit, unitLabel } from '@/features/kadran/format';
 import { alpha, themeMax } from '@/features/kadran/themes';
 import { useHudSystem } from '@/features/kadran/useHudSystem';
 import { useKadran, useRememberPosition } from '@/features/kadran/useKadran';
@@ -127,6 +127,8 @@ export default function Cockpit() {
         now={gps.now}
         odo={odo}
         signal={signal}
+        sigLevel={gps.status === 'demo' ? 4 : signal === 'none' ? 0 : signalBars(gps.accuracy)}
+        peak={fixed ? toUnit(gps.maxKmh, nx.unit) : null}
       />
     );
   };

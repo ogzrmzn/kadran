@@ -15,7 +15,10 @@ export type GaugeKind =
   | 'drum' // Dönen tambur: büyüteç penceresinden akan rakamlar — 70'ler Fransız
   | 'column' // Dikey termometre: yükselen kırmızı sütun — 60'lar Alman sedanı
   | 'vfd' // Vakum floresan dijital: yeşil segment rakam + yay çubuk grafik — 80'ler
-  | 'led'; // Kırmızı LED: segment rakam + yatay LED merdiven — 70'ler sonu
+  | 'led' // Kırmızı LED: segment rakam + yatay LED merdiven — 70'ler sonu
+  | 'arcband' // Fildişi gövde, üstte siyah rakam şeridi, alttan yelpaze ibre, ızgara + lamba sırası — 60'lar İtalyan
+  | 'chev' // Bordo lake panelde siyah yelpaze kadran, eğik rakamlar ve noktalar — 50'ler Amerikan
+  | 'band'; // Yatay bant: soldan büyüyen turuncu şerit, altta saat — 60'lar İsveç
 
 /** Panel kaplaması (arka plan dokusu) */
 export type Fascia = 'crackle' | 'brushed' | 'body' | 'wood' | 'plastic' | 'ivory' | 'glass';
@@ -67,6 +70,58 @@ export interface ClassicTheme {
 const base = { warn: '#FFB23E', danger: '#FF4A3D' };
 
 export const THEMES: Record<ThemeId, ClassicTheme> = {
+  fildisi: {
+    id: 'fildisi',
+    name: 'Fildişi 124',
+    era: "1960'LAR · İTALYAN",
+    tagline: 'Fildişi gövde · siyah rakam şeridi · alttan yelpaze ibre · krom ızgara ve lamba sırası',
+    gauge: 'arcband',
+    fascia: 'ivory',
+    glyph: 'classic',
+    maxKmh: 180,
+    maxMph: 110,
+    day: { ...base, bg: '#4A4438', face: '#5E5F59', text: '#F4F1E6', needle: '#E9C27A', chrome: '#D6D2C4', primary: '#E9C27A', secondary: '#F4F1E6', holo: '#E9C27A', dim: '#B4AA92', glass: 'rgba(244,241,230,0.07)' },
+    night: { ...base, bg: '#1A1712', face: '#262622', text: '#C8F0A8', needle: '#FFC86A', chrome: '#6A665C', primary: '#C8F0A8', secondary: '#C8F0A8', holo: '#FFC86A', dim: '#5E584A', glass: 'rgba(200,240,168,0.05)' },
+  },
+  bordo: {
+    id: 'bordo',
+    name: 'Bordo 55',
+    era: "1950'LER · AMERİKAN V8",
+    tagline: 'Bordo lake panel · krom çerçeveli siyah yelpaze kadran · eğik rakamlar ve noktalar',
+    gauge: 'chev',
+    fascia: 'body',
+    glyph: 'italic',
+    maxKmh: 180,
+    maxMph: 110,
+    day: { ...base, bg: '#5A0E16', face: '#0B0909', text: '#F1E7D2', needle: '#F1E7D2', chrome: '#E4E6EA', primary: '#F0C27A', secondary: '#FFB23E', holo: '#E23A2A', dim: '#C9A0A0', glass: 'rgba(241,231,210,0.07)' },
+    night: { ...base, bg: '#2A060A', face: '#060505', text: '#FFD58A', needle: '#FFE3A8', chrome: '#6E6A6A', primary: '#FFC86A', secondary: '#FFB23E', holo: '#FF5030', dim: '#7A4A4A', glass: 'rgba(255,200,106,0.06)' },
+  },
+  isvec: {
+    id: 'isvec',
+    name: 'İsveç 68',
+    era: "1960'LAR · İSKANDİNAV",
+    tagline: 'Siyah panel · soldan büyüyen turuncu bant · altta saat ve sayaç',
+    gauge: 'band',
+    fascia: 'crackle',
+    glyph: 'classic',
+    maxKmh: 160,
+    maxMph: 100,
+    day: { ...base, bg: '#151515', face: '#0A0A0A', text: '#F2F2EE', needle: '#FF6A1F', chrome: '#BFC3C7', primary: '#FF8A3A', secondary: '#F2F2EE', holo: '#FF6A1F', dim: '#8E8E8A', glass: 'rgba(255,255,255,0.05)' },
+    night: { ...base, bg: '#070707', face: '#050505', text: '#BDEBFF', needle: '#FF5A12', chrome: '#4E5256', primary: '#9FD8FF', secondary: '#BDEBFF', holo: '#FF5A12', dim: '#4A5A64', glass: 'rgba(159,216,255,0.05)' },
+  },
+  yesil: {
+    id: 'yesil',
+    name: 'Yeşil Klasik',
+    era: "1950'LER · YEŞİL KAPORTA",
+    tagline: 'Yeşil boyalı panel · büyük krem kadran · siyah rakamlar · kırmızı ibre',
+    gauge: 'sport',
+    fascia: 'body',
+    glyph: 'classic',
+    maxKmh: 160,
+    maxMph: 100,
+    day: { ...base, bg: '#2F5E43', face: '#EFE6CC', text: '#1D1C17', needle: '#C8281E', chrome: '#E2E4E6', primary: '#E8D9A6', secondary: '#1D1C17', holo: '#C8281E', dim: '#A9C7B0', glass: 'rgba(239,230,204,0.08)' },
+    night: { ...base, bg: '#11261A', face: '#0F1D14', text: '#8DF5A6', needle: '#FF5A3A', chrome: '#5D6A62', primary: '#8DF5A6', secondary: '#8DF5A6', holo: '#FF5A3A', dim: '#4C6E57', glass: 'rgba(141,245,166,0.05)' },
+  },
   anadolu: {
     id: 'anadolu',
     name: 'Anadolu 131',

@@ -3,7 +3,7 @@
  * eksik/eski alanlar her okumada varsayılanlarla tamamlanır.
  */
 
-export type ThemeId = 'anadolu' | 'serit' | 'krom' | 'tambur' | 'termometre' | 'roadster' | 'vfd' | 'led';
+export type ThemeId = 'fildisi' | 'bordo' | 'isvec' | 'yesil' | 'anadolu' | 'serit' | 'krom' | 'tambur' | 'termometre' | 'roadster' | 'vfd' | 'led';
 export type Orientation = 'yatay' | 'dikey';
 /** Cam modunda aynalama: telefonun hangi kenarı cama bakıyor */
 export type MirrorAxis = 'ust' | 'alt';
@@ -74,7 +74,7 @@ export const DEFAULT_SETTINGS: KadranSettings = {
   lastPos: null,
 };
 
-export const THEME_IDS: ThemeId[] = ['anadolu', 'serit', 'krom', 'roadster', 'tambur', 'termometre', 'vfd', 'led'];
+export const THEME_IDS: ThemeId[] = ['fildisi', 'bordo', 'isvec', 'yesil', 'anadolu', 'serit', 'krom', 'roadster', 'tambur', 'termometre', 'vfd', 'led'];
 
 /** Hız uyarısı adımı ve sınırları (seçili birimde) */
 export const ALERT_STEP = 10;

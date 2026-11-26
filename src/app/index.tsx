@@ -233,6 +233,7 @@ export default function Home() {
                       unit={nx.unit === 'mph' ? 'MPH' : 'KM/H'}
                       reduced={enterReduced}
                       odo="128.4"
+                      peak={nx.unit === 'mph' ? 55 : 90}
                       now={new Date(2026, 0, 1, 10, 9, 30).getTime()}
                       assist={nx.digitalAssist}
                     />

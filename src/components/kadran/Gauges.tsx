@@ -1,7 +1,7 @@
 import { memo, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { StyleSheet, View } from 'react-native';
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withSpring, withTiming, type SharedValue } from 'react-native-reanimated';
-import Svg, { Circle, Defs, G, LinearGradient, Path, RadialGradient, Rect, Stop, Text as SvgText } from 'react-native-svg';
+import Svg, { Circle, Defs, G, LinearGradient, Path, Pattern, RadialGradient, Rect, Stop, Text as SvgText } from 'react-native-svg';
 import { alpha, mix, shade, type GaugeKind, type GlyphStyle, type Palette } from '@/features/kadran/themes';
 import { glyphPath } from './KdNumber';
 import { LABEL_FONT } from './primitives';
@@ -37,10 +37,14 @@ export interface GaugeProps {
   odo?: string | null;
   /** Uyarı lambaları için GPS durumu */
   signal?: Signal;
+  /** GPS sinyal seviyesi 0..4 (küçük sinyal göstergeleri) */
+  sigLevel?: number;
+  /** Yolculuğun maksimum hızı (seçili birimde) */
+  peak?: number | null;
 }
 
 /** Göstergenin yükseklik/genişlik oranı */
-export const GAUGE_ASPECT: Record<GaugeKind, number> = { twin: 0.5, ribbon: 0.48, fan: 0.64, sport: 0.88, drum: 0.52, column: 1.2, vfd: 0.66, led: 0.52 };
+export const GAUGE_ASPECT: Record<GaugeKind, number> = { twin: 0.5, ribbon: 0.48, fan: 0.64, sport: 0.88, drum: 0.52, column: 1.2, vfd: 0.66, led: 0.52, arcband: 0.46, chev: 0.64, band: 0.46 };
 
 const D2R = Math.PI / 180;
 const pt = (cx: number, cy: number, r: number, deg: number) => [cx + r * Math.cos(deg * D2R), cy + r * Math.sin(deg * D2R)] as const;
@@ -847,6 +851,280 @@ const LedGauge = memo(function LedGauge({ speed, max, width, pal, unit, over, re
   );
 });
 
+// ---------------------------------------------------------------------------
+// 9) Fildişi 124 — fildişi gövde, üstte siyah rakam şeridi, alttan yelpaze ibre
+//    (sol küçük gösterge: GPS sinyali, sağ: yolculuk maksimum hızı; altta ızgara ve lamba sırası)
+// ---------------------------------------------------------------------------
+const AB = { x0: 22, x1: 79, strip: 9, faceTop: 13.2, faceBot: 28, px: 50, py: 33 };
+
+const ArcBandGauge = memo(function ArcBandGauge({ speed, max, width, pal, unit, over, reduced, center, assist, odo, signal = 'ok', sigLevel = 4, peak }: GaugeProps) {
+  const h = width * GAUGE_ASPECT.arcband;
+  const k = width / 100;
+  const id = useGid();
+  const f = useNeedle(speed, max, reduced);
+  const shown = useTweenedSpeed(assist ? speed : null, reduced);
+  const span = AB.x1 - AB.x0;
+  const xOf = (v: number) => AB.x0 + (span * v) / max;
+  const ticks = useMemo(() => {
+    const maj: string[] = [];
+    const min: string[] = [];
+    for (let v = 0; v <= max + 0.01; v += 10) {
+      const x = AB.x0 + (span * v) / max;
+      const ang = Math.atan2(AB.faceTop + 0.6 - AB.py, x - AB.px);
+      const big = v % 20 === 10;
+      const len = big ? 4.6 : 2.6;
+      const x2 = x - Math.cos(ang) * len;
+      const y2 = AB.faceTop + 0.6 - Math.sin(ang) * len;
+      (big ? maj : min).push(`M${f2(x)} ${f2(AB.faceTop + 0.6)}L${f2(x2)} ${f2(y2)}`);
+    }
+    return { maj: maj.join(''), min: min.join('') };
+  }, [max, span]);
+  const nums: number[] = [];
+  const st = max > 160 ? 20 : 20;
+  for (let v = 10; v <= max; v += st) nums.push(v);
+  // ibre açısı: sabit pivot'tan şeritteki değer noktasına
+  const L = 26;
+  const nStyle = useAnimatedStyle(() => {
+    const x = AB.x0 + span * Math.min(1.01, f.value);
+    const a = (Math.atan2(AB.faceTop + 1 - AB.py, x - AB.px) * 180) / Math.PI;
+    return { transform: [{ rotate: `${a}deg` }] };
+  });
+  const mini = (cx: number, frac: number, a0: number, a1: number) => {
+    const a = a0 + (a1 - a0) * Math.max(0, Math.min(1, frac));
+    const [x, y] = pt(cx, 30, 12.4, a);
+    return `M${cx} 30L${f2(x)} ${f2(y)}`;
+  };
+  const lamps = [
+    { on: signal === 'ok', c: '#46D45E' },
+    { on: signal === 'weak', c: '#FFB23E' },
+    { on: signal === 'none', c: '#FF7A1A' },
+    { on: false, c: '#4AA8FF' },
+    { on: false, c: '#46D45E' },
+    { on: !!over, c: '#FF3B2F' },
+  ];
+  const ivory = mix(pal.chrome, '#F1E9D2', 0.75);
+  return (
+    <Shell width={width} height={h} center={center} pal={pal}>
+      <Svg width={width} height={h} viewBox="0 0 100 46" style={StyleSheet.absoluteFill}>
+        <ChromeDefs id={id} pal={pal} />
+        <Defs>
+          <LinearGradient id={`${id}i`} x1="0" y1="0" x2="0" y2="1">
+            <Stop offset="0" stopColor={mix(ivory, '#FFFFFF', 0.3)} />
+            <Stop offset="1" stopColor={shade(ivory, 0.75)} />
+          </LinearGradient>
+          <LinearGradient id={`${id}y`} x1="0" y1="0" x2="0" y2="1">
+            <Stop offset="0" stopColor={mix(pal.face, '#FFFFFF', 0.12)} />
+            <Stop offset="1" stopColor={shade(pal.face, 0.8)} />
+          </LinearGradient>
+        </Defs>
+        {/* fildişi gövde, krom kenar */}
+        <Rect x={0.5} y={0.5} width={99} height={45} rx={3.5} fill={`url(#${id}i)`} stroke={alpha(pal.chrome, 0.9)} strokeWidth={0.6} />
+        <Rect x={2.6} y={3.4} width={94.8} height={39.6} rx={2} fill="#08090A" />
+        {/* gri yüz + mini göstergeler */}
+        <Rect x={4} y={AB.faceTop - 8.4} width={92} height={AB.faceBot - AB.faceTop + 8.4} fill={`url(#${id}y)`} />
+        {/* üst siyah rakam şeridi */}
+        <Rect x={AB.x0 - 5.5} y={4.4} width={span + 11} height={8.8} fill="#050505" />
+        {nums.map((v) => (
+          <DialNum key={v} text={String(v)} x={xOf(v)} y={AB.strip} h={4.6} color={pal.text} style="classic" cond={0.52} ws={1.2} />
+        ))}
+        <Label x={AB.x1 + 5} y={18} size={2.2} color={pal.text} anchor="end">
+          {unit.toLowerCase()}
+        </Label>
+        <Path d={ticks.min} stroke={alpha(pal.text, 0.75)} strokeWidth={0.4} />
+        <Path d={ticks.maj} stroke={pal.text} strokeWidth={0.75} />
+        {/* sol: GPS sinyali */}
+        <Label x={10} y={8.6} size={1.9} color={alpha(pal.text, 0.7)} spacing={0.3}>
+          SİNYAL
+        </Label>
+        {['0', '½', '1'].map((t, i) => {
+          const [x, y] = pt(10, 30, 15.2, 250 + i * 20);
+          const [a, b] = pt(10, 30, 12.6, 250 + i * 20);
+          const [c, d2] = pt(10, 30, 10.8, 250 + i * 20);
+          return (
+            <G key={t}>
+              <Label x={x} y={y + 0.8} size={2.6} color={pal.text}>
+                {t}
+              </Label>
+              <Path d={`M${f2(a)} ${f2(b)}L${f2(c)} ${f2(d2)}`} stroke={pal.text} strokeWidth={0.5} />
+            </G>
+          );
+        })}
+        <Path d={mini(10, sigLevel / 4, 250, 290)} stroke={pal.needle} strokeWidth={0.7} />
+        {/* sağ: yolculuk maksimum hızı */}
+        <Label x={90} y={8.6} size={2.2} color={pal.text} spacing={0.3}>
+          MAKS
+        </Label>
+        {[0, 1, 2].map((i) => {
+          const [a, b] = pt(90, 30, 12.6, 250 + i * 20);
+          const [c, d2] = pt(90, 30, 10.8, 250 + i * 20);
+          return <Path key={i} d={`M${f2(a)} ${f2(b)}L${f2(c)} ${f2(d2)}`} stroke={i === 2 ? pal.danger : pal.text} strokeWidth={0.5} />;
+        })}
+        <Path d={mini(90, (peak ?? 0) / max, 250, 290)} stroke={pal.needle} strokeWidth={0.7} />
+        <Odo x={AB.px - 2} y={24.6} h={3.6} text={odo} pal={pal} />
+        {assist ? <DigiWin x={AB.px + 14} y={24.6} h={4} value={shown} pal={pal} over={over} /> : null}
+        {/* krom ızgara */}
+        {Array.from({ length: 7 }, (_, i) => (
+          <Path key={i} d={`M4 ${f2(AB.faceBot + 0.4 + i * 0.75)}H96`} stroke={i % 2 ? '#1A1A1A' : mix(pal.chrome, '#FFFFFF', 0.3)} strokeWidth={0.4} />
+        ))}
+        {/* lamba sırası (gerçek durum) */}
+        {lamps.map((l, i) => {
+          const x = i < 3 ? 12 + i * 11 : 58 + (i - 3) * 11;
+          return <Rect key={i} x={x} y={37} width={7.5} height={2.8} rx={0.4} fill={l.on ? l.c : '#26292C'} stroke="#000" strokeWidth={0.3} />;
+        })}
+        <Rect x={2.6} y={3.4} width={94.8} height={14} fill={`url(#${id}g)`} />
+      </Svg>
+      {/* ibre: yalnız gri yüzde görünür */}
+      <View pointerEvents="none" style={{ position: 'absolute', left: 4 * k, top: AB.faceTop * k, width: 92 * k, height: (AB.faceBot - AB.faceTop) * k, overflow: 'hidden' }}>
+        <Animated.View style={[{ position: 'absolute', left: (AB.px - 4 - L) * k, top: (AB.py - AB.faceTop - L) * k, width: 2 * L * k, height: 2 * L * k }, nStyle]}>
+          <Svg width={2 * L * k} height={2 * L * k} viewBox={`${-L} ${-L} ${2 * L} ${2 * L}`}>
+            <Path d={`M0 -0.9 L${L - 0.5} -0.35 L${L - 0.5} 0.35 L0 0.9 Z`} fill="#000" opacity={0.35} transform="translate(0.4 0.6)" />
+            <Path d={`M0 -0.9 L${L - 0.5} -0.35 L${L - 0.5} 0.35 L0 0.9 Z`} fill={over ? pal.danger : pal.needle} />
+          </Svg>
+        </Animated.View>
+      </View>
+    </Shell>
+  );
+});
+
+// ---------------------------------------------------------------------------
+// 10) Bordo 55 — bordo lake panelde krom çerçeveli siyah yelpaze kadran,
+//     yay üzerinde eğik rakamlar ve altlarında noktalar
+// ---------------------------------------------------------------------------
+const CF = { cx: 50, cy: 60, R: 44, a0: 196, sw: 148 };
+
+const ChevFanGauge = memo(function ChevFanGauge({ speed, max, width, pal, unit, over, reduced, center, assist, odo, sigLevel = 4 }: GaugeProps) {
+  const h = width * GAUGE_ASPECT.chev;
+  const k = width / 100;
+  const id = useGid();
+  const f = useNeedle(speed, max, reduced);
+  const shown = useTweenedSpeed(assist ? speed : null, reduced);
+  const { cx, cy, R, a0, sw } = CF;
+  const step = max > 130 ? 20 : 10;
+  const dots = useMemo(() => {
+    const big: string[] = [];
+    const small: string[] = [];
+    for (let v = 0; v <= max + 0.01; v += step / 2) {
+      const [x, y] = pt(cx, cy, R - 15, a0 + (sw * v) / max);
+      (v % step === 0 ? big : small).push(`M${f2(x)} ${f2(y)}L${f2(x)} ${f2(y + 0.01)}`);
+    }
+    return { big: big.join(''), small: small.join('') };
+  }, [max, step, cx, cy, R, a0, sw]);
+  // kadran yüzü: yay + alt köşeler
+  const [lx, ly] = pt(cx, cy, R + 2, a0 - 6);
+  const [rx, ry] = pt(cx, cy, R + 2, a0 + sw + 6);
+  const facePath = `M${f2(lx)} ${f2(ly)} A${R + 2} ${R + 2} 0 0 1 ${f2(rx)} ${f2(ry)} L${cx + 14} 61 L${cx - 14} 61 Z`;
+  return (
+    <Shell width={width} height={h} center={center} pal={pal}>
+      <Svg width={width} height={h} viewBox="0 0 100 64">
+        <ChromeDefs id={id} pal={pal} />
+        <Defs>
+          <Pattern id={`${id}p`} x={0} y={0} width={1.4} height={1.4} patternUnits="userSpaceOnUse">
+            <Circle cx={0.7} cy={0.7} r={0.28} fill="#FFFFFF" opacity={0.07} />
+          </Pattern>
+        </Defs>
+        <Path d={facePath} fill={`url(#${id}c)`} stroke={alpha('#FFFFFF', 0.5)} strokeWidth={0.4} transform={`translate(${cx} ${cy}) scale(1.045) translate(${-cx} ${-cy})`} />
+        <Path d={facePath} fill={pal.face} />
+        <Path d={facePath} fill={`url(#${id}p)`} />
+        {Array.from({ length: Math.floor(max / step) + 1 }, (_, i) => i * step).map((v) => {
+          const [x, y] = pt(cx, cy, R - 6.5, a0 + (sw * v) / max);
+          return <DialNum key={v} text={String(v)} x={x} y={y} h={6.4} color={pal.text} style="italic" cond={0.6} ws={1.05} />;
+        })}
+        <Path d={dots.big} stroke={pal.text} strokeWidth={1.4} strokeLinecap="round" />
+        <Path d={dots.small} stroke={alpha(pal.text, 0.7)} strokeWidth={0.8} strokeLinecap="round" />
+        {/* üst: sinyal lambaları (yakıt göstergesi yerine gerçek GPS durumu) */}
+        <Label x={cx} y={8.6} size={2.3} color={alpha(pal.text, 0.8)} spacing={0.8}>
+          SİNYAL
+        </Label>
+        {[0, 1, 2, 3].map((i) => (
+          <Circle key={i} cx={cx - 6 + i * 4} cy={11.6} r={0.9} fill={i < sigLevel ? pal.secondary : '#2A2522'} />
+        ))}
+        <Label x={cx - 10.5} y={12.4} size={2.2} color={pal.text}>
+          Z
+        </Label>
+        <Label x={cx + 10.5} y={12.4} size={2.2} color={pal.text}>
+          İ
+        </Label>
+        <Odo x={cx} y={42} h={3.8} text={odo} pal={pal} />
+        {assist ? <DigiWin x={cx} y={33.5} h={5} value={shown} pal={pal} over={over} /> : null}
+        {/* krom göbek */}
+        <Path d={`M${cx - 11} 61 A11 11 0 0 1 ${cx + 11} 61 Z`} fill={`url(#${id}c)`} />
+        <Label x={cx} y={58.6} size={2.4} color="#1A1A1A" spacing={1}>
+          {unit}
+        </Label>
+        <Path d={`${arc(cx, cy, R + 1, a0, a0 + 70)} L${cx - 20} 30 Z`} fill={`url(#${id}g)`} />
+      </Svg>
+      <Needle f={f} k={k} cx={cx} cy={cy} a0={a0} sweep={sw} len={R - 13} tail={0} w={0.9} color={over ? pal.danger : pal.needle} hub={0.1} hubColor={pal.chrome} />
+    </Shell>
+  );
+});
+
+// ---------------------------------------------------------------------------
+// 11) İsveç 68 — siyah panelde yatay bant: soldan büyüyen turuncu-kırmızı şerit; altta saat ve sayaç
+// ---------------------------------------------------------------------------
+const BD = { x0: 10, x1: 90, top: 15, bot: 20.5 };
+
+const BandGauge = memo(function BandGauge({ speed, max, width, pal, unit, over, reduced, center, assist, now, odo }: GaugeProps) {
+  const h = width * GAUGE_ASPECT.band;
+  const k = width / 100;
+  const id = useGid();
+  const f = useFraction(speed, max, reduced);
+  const shown = useTweenedSpeed(assist ? speed : null, reduced);
+  const span = BD.x1 - BD.x0;
+  const ticks = useMemo(() => {
+    const a: string[] = [];
+    for (let v = 0; v <= max + 0.01; v += 10) {
+      const x = BD.x0 + (span * v) / max;
+      a.push(`M${f2(x)} ${BD.bot + 0.8}L${f2(x)} ${BD.bot + (v % 20 === 0 ? 3 : 1.8)}`);
+    }
+    return a.join('');
+  }, [max, span]);
+  const bandStyle = useAnimatedStyle(() => ({ width: span * k * f.value }));
+  const d = new Date(now ?? SHOW_TIME);
+  const mins = d.getMinutes() + d.getSeconds() / 60;
+  const hrs = (d.getHours() % 12) + mins / 60;
+  const hand = (deg: number, len: number) => {
+    const [x, y] = pt(26, 35.5, len, deg - 90);
+    return `M26 35.5L${f2(x)} ${f2(y)}`;
+  };
+  return (
+    <Shell width={width} height={h} center={center} pal={pal}>
+      <Svg width={width} height={h} viewBox="0 0 100 46" style={StyleSheet.absoluteFill}>
+        <ChromeDefs id={id} pal={pal} />
+        <Rect x={0.5} y={0.5} width={99} height={45} rx={4} fill={shade(pal.bg, 0.8)} stroke={alpha(pal.chrome, 0.3)} strokeWidth={0.5} />
+        <Rect x={4} y={4} width={92} height={23} rx={2.5} fill={`url(#${id}c)`} />
+        <Rect x={5.2} y={5.2} width={89.6} height={20.6} rx={1.8} fill={pal.face} />
+        {Array.from({ length: Math.floor(max / 20) + 1 }, (_, i) => i * 20).map((v) => (
+          <DialNum key={v} text={String(v)} x={BD.x0 + (span * v) / max} y={10.2} h={4.4} color={pal.text} style="classic" cond={0.7} ws={1.2} />
+        ))}
+        <Rect x={BD.x0 - 0.8} y={BD.top - 0.8} width={span + 1.6} height={BD.bot - BD.top + 1.6} rx={0.6} fill="#000" stroke={alpha(pal.text, 0.35)} strokeWidth={0.3} />
+        <Path d={ticks} stroke={pal.text} strokeWidth={0.5} />
+        <Label x={BD.x1} y={25} size={2.2} color={alpha(pal.text, 0.7)} anchor="end">
+          {unit.toLowerCase()}
+        </Label>
+        {/* saat */}
+        <Circle cx={26} cy={35.5} r={7.8} fill={`url(#${id}c)`} />
+        <Circle cx={26} cy={35.5} r={6.8} fill={pal.face} />
+        {Array.from({ length: 12 }, (_, i) => {
+          const [x1, y1] = pt(26, 35.5, 6.2, i * 30 - 90);
+          const [x2, y2] = pt(26, 35.5, i % 3 === 0 ? 4.6 : 5.3, i * 30 - 90);
+          return <Path key={i} d={`M${f2(x1)} ${f2(y1)}L${f2(x2)} ${f2(y2)}`} stroke={pal.text} strokeWidth={i % 3 === 0 ? 0.6 : 0.35} />;
+        })}
+        <Path d={hand(hrs * 30, 3.4)} stroke={pal.text} strokeWidth={0.8} strokeLinecap="round" />
+        <Path d={hand(mins * 6, 5.2)} stroke={pal.text} strokeWidth={0.5} strokeLinecap="round" />
+        <Odo x={assist ? 58 : 66} y={35.5} h={4.2} text={odo} pal={pal} />
+        {assist ? <DigiWin x={84} y={35.5} h={5.4} value={shown} pal={pal} over={over} /> : null}
+        <Rect x={5.2} y={5.2} width={89.6} height={8} fill={`url(#${id}g)`} />
+      </Svg>
+      {/* büyüyen bant */}
+      <View pointerEvents="none" style={{ position: 'absolute', left: BD.x0 * k, top: BD.top * k, height: (BD.bot - BD.top) * k, width: span * k }}>
+        <Animated.View style={[{ height: '100%', backgroundColor: over ? pal.danger : pal.needle, borderTopRightRadius: 1.2 * k, borderBottomRightRadius: 1.2 * k }, bandStyle]}>
+          <View style={{ position: 'absolute', left: 0, right: 0, top: 0, height: '35%', backgroundColor: '#FFFFFF', opacity: 0.22 }} />
+        </Animated.View>
+      </View>
+    </Shell>
+  );
+});
+
 export function Gauge({ kind, ...p }: GaugeProps & { kind: GaugeKind }) {
   switch (kind) {
     case 'ribbon':
@@ -863,6 +1141,12 @@ export function Gauge({ kind, ...p }: GaugeProps & { kind: GaugeKind }) {
       return <VfdGauge {...p} />;
     case 'led':
       return <LedGauge {...p} />;
+    case 'arcband':
+      return <ArcBandGauge {...p} />;
+    case 'chev':
+      return <ChevFanGauge {...p} />;
+    case 'band':
+      return <BandGauge {...p} />;
     default:
       return <TwinGauge {...p} />;
   }

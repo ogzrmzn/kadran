@@ -57,9 +57,9 @@ describe('KADRAN ayarlar', () => {
 });
 
 describe('KADRAN temalar', () => {
-  it('sekiz klasik tema; her birinin gösterge geometrisi farklı', () => {
-    expect(THEME_IDS).toHaveLength(8);
-    expect(new Set(THEME_IDS.map((t) => THEMES[t].gauge)).size).toBe(8);
+  it('on iki klasik tema; geometriler çeşitli', () => {
+    expect(THEME_IDS).toHaveLength(12);
+    expect(new Set(THEME_IDS.map((t) => THEMES[t].gauge)).size).toBe(11);
   });
   it('skala sonu birime göre', () => {
     expect(themeMax(THEMES.anadolu, 'kmh')).toBe(180);
