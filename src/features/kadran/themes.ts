@@ -10,10 +10,8 @@ import type { SpeedUnit, ThemeId } from './settings';
 export type GaugeKind =
   | 'twin' // İki yuvarlak kadran (hız + analog saat), dikdörtgen siyah gövde — 70'ler Anadolu sedanı
   | 'ribbon' // Yatay şerit: sabit skala üzerinde sağa sola kayan ibre — 60'lar
-  | 'fan' // Yarım ay yelpaze: krem kadran, krom halkalar, alttan dönen ibre — 50'ler Amerikan
   | 'sport' // Büyük siyah yuvarlak kadran, krom çerçeve, ceviz panel — İngiliz roadster
   | 'drum' // Dönen tambur: büyüteç penceresinden akan rakamlar — 70'ler Fransız
-  | 'column' // Dikey termometre: yükselen kırmızı sütun — 60'lar Alman sedanı
   | 'vfd' // Vakum floresan dijital: yeşil segment rakam + yay çubuk grafik — 80'ler
   | 'led' // Kırmızı LED: segment rakam + yatay LED merdiven — 70'ler sonu
   | 'arcband' // Fildişi gövde, üstte siyah rakam şeridi, alttan yelpaze ibre, ızgara + lamba sırası — 60'lar İtalyan
@@ -24,7 +22,8 @@ export type GaugeKind =
 export type Fascia = 'crackle' | 'brushed' | 'body' | 'wood' | 'plastic' | 'ivory' | 'glass';
 
 /** Rakam karakteri (özel çizim fontun varyantları) */
-export type GlyphStyle = 'classic' | 'bold' | 'thin' | 'seg' | 'italic';
+/** seg: eğik 7 segment (VFD) · flat: dik, düz 7 segment (LED) */
+export type GlyphStyle = 'classic' | 'bold' | 'thin' | 'seg' | 'flat' | 'italic';
 
 export interface Palette {
   /** Panel / ekran zemini */
@@ -149,19 +148,6 @@ export const THEMES: Record<ThemeId, ClassicTheme> = {
     day: { ...base, bg: '#2A2C2E', face: '#0D0D0E', text: '#F5F2E8', needle: '#FF4B1F', chrome: '#D5D8DB', primary: '#FF6A3A', secondary: '#E8E2CF', holo: '#FF4B1F', dim: '#9B9C9A', glass: 'rgba(255,255,255,0.06)' },
     night: { ...base, bg: '#0B0C0D', face: '#060606', text: '#FFD58E', needle: '#FF3B12', chrome: '#4C5054', primary: '#FFB75A', secondary: '#FFD58E', holo: '#FF3B12', dim: '#6A5A42', glass: 'rgba(255,183,90,0.05)' },
   },
-  krom: {
-    id: 'krom',
-    name: 'Krom 57',
-    era: "1950'LER · AMERİKAN",
-    tagline: 'Krem yelpaze kadran · krom halkalar · kırmızı ibre · turkuaz kaporta paneli',
-    gauge: 'fan',
-    fascia: 'body',
-    glyph: 'italic',
-    maxKmh: 200,
-    maxMph: 120,
-    day: { ...base, bg: '#0E4A4C', face: '#F1E6C9', text: '#231C12', needle: '#D21F1F', chrome: '#E3E6EA', primary: '#E8C468', secondary: '#C9A24A', holo: '#D21F1F', dim: '#8FB8B4', glass: 'rgba(241,230,201,0.08)' },
-    night: { ...base, bg: '#062729', face: '#2B2216', text: '#FFD27A', needle: '#FF4030', chrome: '#6E7378', primary: '#FFC25A', secondary: '#B68A3A', holo: '#FF4030', dim: '#4C7270', glass: 'rgba(255,194,90,0.06)' },
-  },
   roadster: {
     id: 'roadster',
     name: 'Ceviz Roadster',
@@ -188,19 +174,6 @@ export const THEMES: Record<ThemeId, ClassicTheme> = {
     day: { ...base, bg: '#1A1B1D', face: '#0A0A0B', text: '#F2F2EE', needle: '#FF3A2A', chrome: '#9EA3A8', primary: '#FF9A3C', secondary: '#E0DED6', holo: '#FF3A2A', dim: '#868A8E', glass: 'rgba(255,255,255,0.05)' },
     night: { ...base, bg: '#08090A', face: '#050505', text: '#FFB866', needle: '#FF3010', chrome: '#45494D', primary: '#FF9A3C', secondary: '#FFB866', holo: '#FF3010', dim: '#5E5144', glass: 'rgba(255,154,60,0.05)' },
   },
-  termometre: {
-    id: 'termometre',
-    name: 'Termometre',
-    era: "1960'LAR · ALMAN SEDAN",
-    tagline: 'Dikey cam tüp · yükselen kırmızı sütun · fildişi panel',
-    gauge: 'column',
-    fascia: 'ivory',
-    glyph: 'classic',
-    maxKmh: 180,
-    maxMph: 110,
-    day: { ...base, bg: '#3B352B', face: '#0F0E0C', text: '#F3EBD6', needle: '#E8321E', chrome: '#D9D6CF', primary: '#E9B44C', secondary: '#F3EBD6', holo: '#E8321E', dim: '#A99B80', glass: 'rgba(243,235,214,0.07)' },
-    night: { ...base, bg: '#15120E', face: '#070606', text: '#FFCF7E', needle: '#FF3A1A', chrome: '#57534C', primary: '#FFB24A', secondary: '#FFCF7E', holo: '#FF3A1A', dim: '#6B5D45', glass: 'rgba(255,178,74,0.05)' },
-  },
   vfd: {
     id: 'vfd',
     name: 'Dijital 85',
@@ -218,10 +191,10 @@ export const THEMES: Record<ThemeId, ClassicTheme> = {
     id: 'led',
     name: 'LED 79',
     era: "1970'LER SONU · LED",
-    tagline: 'Kırmızı LED rakamlar · yatay LED merdiven · füme cam',
+    tagline: 'Dik, düz kırmızı LED rakamlar · yatay LED merdiven · füme cam',
     gauge: 'led',
     fascia: 'glass',
-    glyph: 'seg',
+    glyph: 'flat',
     maxKmh: 240,
     maxMph: 150,
     day: { ...base, bg: '#0A0505', face: '#050202', text: '#FF3B2F', needle: '#FF3B2F', chrome: '#3A2626', primary: '#FF4A3A', secondary: '#FFB23E', holo: '#FF3B2F', dim: '#7A3A34', glass: 'rgba(255,59,47,0.06)' },

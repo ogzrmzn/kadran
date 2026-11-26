@@ -44,7 +44,7 @@ export interface GaugeProps {
 }
 
 /** Göstergenin yükseklik/genişlik oranı */
-export const GAUGE_ASPECT: Record<GaugeKind, number> = { twin: 0.5, ribbon: 0.48, fan: 0.64, sport: 0.88, drum: 0.52, column: 1.2, vfd: 0.66, led: 0.52, arcband: 0.46, chev: 0.64, band: 0.46 };
+export const GAUGE_ASPECT: Record<GaugeKind, number> = { twin: 0.5, ribbon: 0.48, sport: 0.88, drum: 0.52, vfd: 0.66, led: 0.52, arcband: 0.46, chev: 0.64, band: 0.46 };
 
 const D2R = Math.PI / 180;
 const pt = (cx: number, cy: number, r: number, deg: number) => [cx + r * Math.cos(deg * D2R), cy + r * Math.sin(deg * D2R)] as const;
@@ -123,7 +123,7 @@ function DialNum({ text, x, y, h, color, style, ws = 1, ghost, cond = 1 }: { tex
   const skew = g.skew ? ` translate(${16 * g.skew} 0) skewX(${f2((-Math.atan(g.skew) * 180) / Math.PI)})` : '';
   return (
     <G transform={`translate(${f2(x - w / 2)} ${f2(y - h / 2)}) scale(${(s * cond).toFixed(4)} ${s.toFixed(4)})${skew}`}>
-      {style === 'seg' ? (
+      {style === 'seg' || style === 'flat' ? (
         <>
           {ghost && g.ghost ? <Path d={g.ghost} fill={ghost} /> : null}
           <Path d={g.d} fill={color} />
@@ -468,69 +468,7 @@ const RibbonGauge = memo(function RibbonGauge({ speed, max, width, pal, unit, ov
 });
 
 // ---------------------------------------------------------------------------
-// 3) Krom 57 — yarım ay yelpaze, krem kadran
-// ---------------------------------------------------------------------------
-const FN = { cx: 50, cy: 56, R: 46 };
-const FN_A0 = 190;
-const FN_SW = 160;
-
-const FanGauge = memo(function FanGauge({ speed, max, width, pal, glyph, unit, over, reduced, center, assist, odo }: GaugeProps) {
-  const h = width * GAUGE_ASPECT.fan;
-  const k = width / 100;
-  const id = useGid();
-  const f = useNeedle(speed, max, reduced);
-  const shown = useTweenedSpeed(assist ? speed : null, reduced);
-  const { cx, cy, R } = FN;
-  const ticks = useMemo(() => dialTicks(cx, cy, R - 4, FN_A0, FN_SW, max, [4, 2.8, 1.6]), [cx, cy, R, max]);
-  const step = numEvery(max);
-  const rays = useMemo(() => {
-    const out: string[] = [];
-    for (let a = 182; a < 360; a += 4) {
-      const [x1, y1] = pt(cx, cy, 12, a);
-      const [x2, y2] = pt(cx, cy, R - 12, a);
-      out.push(`M${f2(x1)} ${f2(y1)}L${f2(x2)} ${f2(y2)}`);
-    }
-    return out.join('');
-  }, [cx, cy, R]);
-  return (
-    <Shell width={width} height={h} center={center} pal={pal}>
-      <Svg width={width} height={h} viewBox="0 0 100 64">
-        <ChromeDefs id={id} pal={pal} />
-        {/* krom kubbe çerçeve */}
-        <Path d={`${arc(cx, cy, R + 2.6, 180, 360)} L${cx + R + 2.6} ${cy + 4} L${cx - R - 2.6} ${cy + 4} Z`} fill={`url(#${id}c)`} />
-        <Path d={`${arc(cx, cy, R, 180, 360)} Z`} fill={`url(#${id}f)`} />
-        {/* güneş ışınları ve altın halkalar */}
-        <Path d={rays} stroke={alpha(pal.secondary, 0.22)} strokeWidth={0.5} />
-        <Path d={arc(cx, cy, R - 1.2, 180, 360)} stroke={alpha(pal.secondary, 0.9)} strokeWidth={0.6} fill="none" />
-        <Path d={arc(cx, cy, R - 10.5, 180, 360)} stroke={alpha(pal.secondary, 0.7)} strokeWidth={0.4} fill="none" />
-        <Path d={arc(cx, cy, 22, 180, 360)} stroke={alpha(pal.secondary, 0.85)} strokeWidth={1.6} fill="none" />
-        <Path d={arc(cx, cy, 22, FN_A0 + FN_SW * 0.85, FN_A0 + FN_SW)} stroke={alpha(pal.danger, 0.9)} strokeWidth={1.6} fill="none" />
-        <Path d={ticks.minor} stroke={alpha(pal.text, 0.6)} strokeWidth={0.35} />
-        <Path d={ticks.mid} stroke={pal.text} strokeWidth={0.6} />
-        <Path d={ticks.major} stroke={pal.text} strokeWidth={1.1} />
-        {Array.from({ length: Math.floor(max / step) + 1 }, (_, i) => i * step).map((v) => {
-          const [x, y] = pt(cx, cy, R - 13.5, FN_A0 + (FN_SW * v) / max);
-          return <DialNum key={v} text={String(v)} x={x} y={y} h={4.2} color={pal.text} style={glyph} ws={1.2} cond={0.78} />;
-        })}
-        {assist ? <DigiWin x={cx} y={cy - 17} h={5} value={shown} pal={pal} over={over} /> : null}
-        <Odo x={cx} y={cy - 9} h={3.6} text={odo} pal={pal} />
-        {/* krom taban ve birim plakası */}
-        <Rect x={cx - R - 2.6} y={cy + 1} width={2 * R + 5.2} height={6.4} rx={1.5} fill={`url(#${id}c)`} />
-        <Label x={cx + 30} y={cy + 5.6} size={2.8} color="#1B1B1B" spacing={1.2}>
-          {unit}
-        </Label>
-        <Label x={cx - 30} y={cy + 5.6} size={2.8} color="#1B1B1B" spacing={1.2}>
-          SPEED
-        </Label>
-        <Path d={`${arc(cx, cy, R, 180, 300)} Q40 ${cy - 30} ${cx - R} ${cy - 2} Z`} fill={`url(#${id}g)`} />
-      </Svg>
-      <Needle f={f} k={k} cx={cx} cy={cy} a0={FN_A0} sweep={FN_SW} len={R - 3} tail={3} w={1.6} color={over ? pal.danger : pal.needle} hub={5.2} hubColor={mix(pal.chrome, '#FFFFFF', 0.2)} />
-    </Shell>
-  );
-});
-
-// ---------------------------------------------------------------------------
-// 4) Ceviz Roadster — büyük siyah yuvarlak kadran, 270°
+// 3) Ceviz Roadster — büyük siyah yuvarlak kadran, 270°
 // ---------------------------------------------------------------------------
 const SP = { cx: 50, cy: 44, R: 41, a0: 135, sw: 270 };
 
@@ -592,7 +530,7 @@ const SportGauge = memo(function SportGauge({ speed, max, width, pal, unit, over
 });
 
 // ---------------------------------------------------------------------------
-// 5) Tambur — büyüteç penceresinde dönen rakam tamburu
+// 4) Tambur — büyüteç penceresinde dönen rakam tamburu
 // ---------------------------------------------------------------------------
 const DR = { x0: 6, x1: 94, top: 7, bot: 35 };
 /** Tamburda 10 birimlik aralık (gösterge birimi) */
@@ -672,78 +610,7 @@ const DrumGauge = memo(function DrumGauge({ speed, max, width, pal, unit, over, 
 });
 
 // ---------------------------------------------------------------------------
-// 6) Termometre — dikey cam tüpte yükselen kırmızı sütun (km/h solda, mph sağda)
-// ---------------------------------------------------------------------------
-const CL = { top: 14, bot: 94, x: 46, w: 8 };
-
-const ColumnGauge = memo(function ColumnGauge({ speed, max, width, pal, unit, over, reduced, center, assist, odo }: GaugeProps) {
-  const h = width * GAUGE_ASPECT.column;
-  const k = width / 100;
-  const id = useGid();
-  const f = useFraction(speed, max, reduced);
-  const shown = useTweenedSpeed(assist ? speed : null, reduced);
-  const span = CL.bot - CL.top;
-  const mph = unit === 'MPH';
-  // İkinci skala: diğer birim (gerçek dönüşüm)
-  const otherMax = mph ? max * 1.609344 : max / 1.609344;
-  const step = numEvery(max);
-  const scale = useMemo(() => {
-    const maj: string[] = [];
-    const min: string[] = [];
-    for (let v = 0; v <= max + 0.01; v += 5) {
-      const y = CL.bot - (span * v) / max;
-      if (v % 10 === 0) maj.push(`M${CL.x - 2} ${f2(y)}L${CL.x - (v % 20 === 0 ? 7 : 5)} ${f2(y)}`);
-      else min.push(`M${CL.x - 2} ${f2(y)}L${CL.x - 4} ${f2(y)}`);
-    }
-    const o: string[] = [];
-    const oStep = mph ? 20 : 10;
-    for (let v = 0; v <= otherMax + 0.01; v += oStep / 2) {
-      const y = CL.bot - (span * v) / otherMax;
-      o.push(`M${CL.x + CL.w + 2} ${f2(y)}L${CL.x + CL.w + (v % oStep === 0 ? 6 : 4)} ${f2(y)}`);
-    }
-    return { maj: maj.join(''), min: min.join(''), o: o.join(''), oStep };
-  }, [max, span, otherMax, mph]);
-  const colStyle = useAnimatedStyle(() => ({ height: span * k * f.value }));
-  const col = over ? pal.danger : pal.needle;
-  return (
-    <Shell width={width} height={h} center={center} pal={pal}>
-      <Svg width={width} height={h} viewBox="0 0 100 120" style={StyleSheet.absoluteFill}>
-        <ChromeDefs id={id} pal={pal} />
-        <Rect x={16} y={1.5} width={68} height={117} rx={8} fill={`url(#${id}c)`} />
-        <Rect x={18.5} y={4} width={63} height={112} rx={6} fill={`url(#${id}f)`} />
-        {/* cam tüp */}
-        <Rect x={CL.x} y={CL.top - 3} width={CL.w} height={span + 3} rx={CL.w / 2} fill="#000" stroke={alpha(pal.chrome, 0.6)} strokeWidth={0.5} />
-        <Circle cx={CL.x + CL.w / 2} cy={CL.bot + 4.5} r={6} fill={col} stroke={alpha(pal.chrome, 0.7)} strokeWidth={0.6} />
-        <Circle cx={CL.x + CL.w / 2 - 2} cy={CL.bot + 2.6} r={1.6} fill="#FFF" opacity={0.35} />
-        <Path d={scale.min} stroke={alpha(pal.text, 0.7)} strokeWidth={0.4} />
-        <Path d={scale.maj} stroke={pal.text} strokeWidth={0.8} />
-        <Path d={scale.o} stroke={alpha(pal.text, 0.6)} strokeWidth={0.45} />
-        {Array.from({ length: Math.floor(max / step) + 1 }, (_, i) => i * step).map((v) => (
-          <DialNum key={v} text={String(v)} x={CL.x - 13} y={CL.bot - (span * v) / max} h={4.4} color={pal.text} style="classic" />
-        ))}
-        {Array.from({ length: Math.floor(otherMax / scale.oStep) + 1 }, (_, i) => i * scale.oStep).map((v) => (
-          <DialNum key={`o${v}`} text={String(v)} x={CL.x + CL.w + 11} y={CL.bot - (span * v) / otherMax} h={3.2} color={alpha(pal.text, 0.6)} style="classic" />
-        ))}
-        <Label x={CL.x - 13} y={7.6} size={2.6} color={pal.text}>
-          {unit.toLowerCase()}
-        </Label>
-        <Label x={CL.x + CL.w + 11} y={7.6} size={2.4} color={alpha(pal.text, 0.6)}>
-          {mph ? 'km/h' : 'mph'}
-        </Label>
-        {assist ? <DigiWin x={30} y={110.5} h={5} value={shown} pal={pal} over={over} /> : null}
-        <Odo x={assist ? 63 : 50} y={110.5} h={3.6} text={odo} pal={pal} />
-      </Svg>
-      {/* yükselen sütun */}
-      <View pointerEvents="none" style={{ position: 'absolute', left: (CL.x + 1.6) * k, top: CL.top * k, width: (CL.w - 3.2) * k, height: (span + 1) * k, justifyContent: 'flex-end' }}>
-        <Animated.View style={[{ width: '100%', backgroundColor: col, borderTopLeftRadius: 2 * k, borderTopRightRadius: 2 * k }, colStyle]} />
-      </View>
-      <View pointerEvents="none" style={{ position: 'absolute', left: (CL.x + 1.6) * k, top: CL.top * k, width: 1 * k, height: span * k, backgroundColor: '#FFFFFF', opacity: 0.18 }} />
-    </Shell>
-  );
-});
-
-// ---------------------------------------------------------------------------
-// 7) Dijital 85 — vakum floresan (VFD): segment rakam + yay çubuk grafik
+// 5) Dijital 85 — vakum floresan (VFD): segment rakam + yay çubuk grafik
 // ---------------------------------------------------------------------------
 const VF = { cx: 50, cy: 47, r1: 34, r2: 42, a0: 165, sw: 210, n: 42 };
 const VFD_SEGS = Array.from({ length: VF.n }, (_, i) => {
@@ -804,11 +671,11 @@ const VfdGauge = memo(function VfdGauge({ speed, max, width, pal, unit, over, re
 });
 
 // ---------------------------------------------------------------------------
-// 8) LED 79 — kırmızı LED rakamlar + yatay LED merdiven
+// 6) LED 79 — dik, düz kırmızı LED rakamlar + yatay LED merdiven
 // ---------------------------------------------------------------------------
 const LED_N = 30;
 
-const LedGauge = memo(function LedGauge({ speed, max, width, pal, unit, over, reduced, center, odo }: GaugeProps) {
+const LedGauge = memo(function LedGauge({ speed, max, width, pal, glyph, unit, over, reduced, center, odo }: GaugeProps) {
   const h = width * GAUGE_ASPECT.led;
   const id = useGid();
   const shown = useTweenedSpeed(speed, reduced);
@@ -834,11 +701,11 @@ const LedGauge = memo(function LedGauge({ speed, max, width, pal, unit, over, re
           </LinearGradient>
         </Defs>
         <Rect x={0.6} y={0.6} width={98.8} height={50.8} rx={3} fill={pal.face} stroke={alpha(pal.chrome, 0.9)} strokeWidth={0.8} />
-        <DialNum text={txt.padStart(3, ' ')} x={46} y={18} h={24} color={over ? pal.secondary : pal.text} style="seg" ghost={ghost} />
+        <DialNum text={txt.padStart(3, ' ')} x={46} y={18} h={24} color={over ? pal.secondary : pal.text} style={glyph} ghost={ghost} />
         <Label x={86} y={14} size={3.2} color={pal.text} spacing={1}>
           {unit}
         </Label>
-        <DialNum text={odo ?? '--'} x={86} y={24} h={3.8} color={alpha(pal.text, 0.8)} style="seg" />
+        <DialNum text={odo ?? '--'} x={86} y={24} h={3.8} color={alpha(pal.text, 0.8)} style={glyph} />
         <Label x={86} y={30.5} size={2.2} color={alpha(pal.text, 0.6)} spacing={0.8}>
           TRIP
         </Label>
@@ -852,7 +719,7 @@ const LedGauge = memo(function LedGauge({ speed, max, width, pal, unit, over, re
 });
 
 // ---------------------------------------------------------------------------
-// 9) Fildişi 124 — fildişi gövde, üstte siyah rakam şeridi, alttan yelpaze ibre
+// 7) Fildişi 124 — fildişi gövde, üstte siyah rakam şeridi, alttan yelpaze ibre
 //    (sol küçük gösterge: GPS sinyali, sağ: yolculuk maksimum hızı; altta ızgara ve lamba sırası)
 // ---------------------------------------------------------------------------
 const AB = { x0: 22, x1: 79, strip: 9, faceTop: 13.2, faceBot: 28, px: 50, py: 33 };
@@ -987,7 +854,7 @@ const ArcBandGauge = memo(function ArcBandGauge({ speed, max, width, pal, unit, 
 });
 
 // ---------------------------------------------------------------------------
-// 10) Bordo 55 — bordo lake panelde krom çerçeveli siyah yelpaze kadran,
+// 8) Bordo 55 — bordo lake panelde krom çerçeveli siyah yelpaze kadran,
 //     yay üzerinde eğik rakamlar ve altlarında noktalar
 // ---------------------------------------------------------------------------
 const CF = { cx: 50, cy: 60, R: 44, a0: 196, sw: 148 };
@@ -1059,7 +926,7 @@ const ChevFanGauge = memo(function ChevFanGauge({ speed, max, width, pal, unit, 
 });
 
 // ---------------------------------------------------------------------------
-// 11) İsveç 68 — siyah panelde yatay bant: soldan büyüyen turuncu-kırmızı şerit; altta saat ve sayaç
+// 9) İsveç 68 — siyah panelde yatay bant: soldan büyüyen turuncu-kırmızı şerit; altta saat ve sayaç
 // ---------------------------------------------------------------------------
 const BD = { x0: 10, x1: 90, top: 15, bot: 20.5 };
 
@@ -1129,14 +996,10 @@ export function Gauge({ kind, ...p }: GaugeProps & { kind: GaugeKind }) {
   switch (kind) {
     case 'ribbon':
       return <RibbonGauge {...p} />;
-    case 'fan':
-      return <FanGauge {...p} />;
     case 'sport':
       return <SportGauge {...p} />;
     case 'drum':
       return <DrumGauge {...p} />;
-    case 'column':
-      return <ColumnGauge {...p} />;
     case 'vfd':
       return <VfdGauge {...p} />;
     case 'led':

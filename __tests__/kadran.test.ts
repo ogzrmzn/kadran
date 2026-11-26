@@ -44,7 +44,7 @@ describe('KADRAN ayarlar', () => {
     expect(r.widgets.distance).toBe(true);
   });
   it('bozuk alanlar güvenli değere döner', () => {
-    const r = resolveSettings({ theme: 'nexus', speedAlert: 999, mirrorAxis: 'x', camOrientation: 'x', cockpitOrientation: 'x', accent: 'kirmizi', speedColor: 12, digitalAssist: 'evet' });
+    const r = resolveSettings({ theme: 'krom', speedAlert: 999, mirrorAxis: 'x', camOrientation: 'x', cockpitOrientation: 'x', accent: 'kirmizi', speedColor: 12, digitalAssist: 'evet' });
     expect(r.theme).toBe('anadolu');
     expect(r.speedAlert).toBe(250);
     expect(r.mirrorAxis).toBe('ust');
@@ -57,9 +57,11 @@ describe('KADRAN ayarlar', () => {
 });
 
 describe('KADRAN temalar', () => {
-  it('on iki klasik tema; geometriler çeşitli', () => {
-    expect(THEME_IDS).toHaveLength(12);
-    expect(new Set(THEME_IDS.map((t) => THEMES[t].gauge)).size).toBe(11);
+  it('on klasik tema; geometriler çeşitli', () => {
+    expect(THEME_IDS).toHaveLength(10);
+    expect(new Set(THEME_IDS.map((t) => THEMES[t].gauge)).size).toBe(9);
+    expect(THEME_IDS).not.toContain('krom');
+    expect(THEME_IDS).not.toContain('termometre');
   });
   it('skala sonu birime göre', () => {
     expect(themeMax(THEMES.anadolu, 'kmh')).toBe(180);
@@ -76,7 +78,7 @@ describe('KADRAN temalar', () => {
       const n = paletteFor(THEMES[t], false, null);
       expect(lum(n.bg)).toBeLessThan(lum(d.bg));
     }
-    expect(paletteFor(THEMES.krom, true, '#7CE07A').needle).toBe('#7CE07A');
+    expect(paletteFor(THEMES.anadolu, true, '#7CE07A').needle).toBe('#7CE07A');
   });
   it('cam paleti saf siyah; gece amber kısılır', () => {
     expect(windshieldPalette(true, null).bg).toBe('#000000');

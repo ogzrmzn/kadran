@@ -95,7 +95,7 @@ export function DataCell({
         </KdLabel>
       </View>
       <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 5 }}>
-        <KdNumber text={value} height={size} color={color ?? pal.text} style={glyph} glow={glyph === 'seg' ? pal.text : undefined} />
+        <KdNumber text={value} height={size} color={color ?? pal.text} style={glyph} glow={glyph === 'seg' || glyph === 'flat' ? pal.text : undefined} />
         {unit ? (
           <KdLabel color={alpha(pal.text, 0.65)} size={Math.max(9, size * 0.34)} spacing={1} style={{ marginBottom: -1 }}>
             {unit}

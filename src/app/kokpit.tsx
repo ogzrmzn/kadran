@@ -83,7 +83,7 @@ export default function Cockpit() {
   ].filter(Boolean) as { k: string; label: string; value: string; unit?: string; icon: string }[];
 
   const cell = (c: (typeof cells)[number], size = cellSize, align: 'flex-start' | 'center' | 'flex-end' = 'flex-start') => (
-    <DataCell key={c.k} label={c.label} value={c.value} unit={c.unit} pal={pal} glyph={theme.glyph === 'seg' ? 'seg' : 'classic'} size={size} align={align} icon={c.icon} />
+    <DataCell key={c.k} label={c.label} value={c.value} unit={c.unit} pal={pal} glyph={theme.glyph === 'seg' || theme.glyph === 'flat' ? theme.glyph : 'classic'} size={size} align={align} icon={c.icon} />
   );
 
   // Gösterge ortası: bağlantı durumuna göre
@@ -195,7 +195,7 @@ export default function Cockpit() {
           showGps={w.gps}
           showClock={w.clock}
           clockHeight={Math.max(16, cellSize * 0.75)}
-          glyph={theme.glyph === 'seg' ? 'seg' : 'classic'}
+          glyph={theme.glyph === 'seg' || theme.glyph === 'flat' ? theme.glyph : 'classic'}
           weather={weather}
           moving={moving}
           onPanel={() => setDrawer(true)}

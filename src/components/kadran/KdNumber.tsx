@@ -70,6 +70,7 @@ const STYLES: Record<GlyphStyle, StyleDef> = {
   thin: { weight: 0.05, skew: 0 },
   italic: { weight: 0.1, skew: 0.18 },
   seg: { weight: 0, skew: 0.12 },
+  flat: { weight: 0, skew: 0 },
 };
 
 interface Built {
@@ -96,7 +97,7 @@ function build(text: string, style: GlyphStyle): Built {
   const off: string[] = [];
   [...text].forEach((ch, i) => {
     if (i > 0) x += GAP;
-    if (style === 'seg') {
+    if (style === 'seg' || style === 'flat') {
       const segs = SEG_ON[ch];
       if (segs != null) {
         for (const k of Object.keys(SEG)) (segs.includes(k) ? on : off).push(translate(SEG[k], x));
@@ -162,7 +163,7 @@ export const KdNumber = memo(function KdNumber({
   return (
     <Svg width={w} height={height} viewBox={`${-pad} ${-pad} ${vbW} ${vbH}`} opacity={opacity}>
       <G transform={skew}>
-        {style === 'seg' ? (
+        {style === 'seg' || style === 'flat' ? (
           <>
             {ghost !== null && gd ? <Path d={gd} fill={ghost ?? color} fillOpacity={ghost ? 1 : 0.07} /> : null}
             {glow ? <Path d={d} fill="none" stroke={glow} strokeOpacity={0.25} strokeWidth={1.2} strokeLinejoin="round" /> : null}
