@@ -22,8 +22,8 @@ export type GaugeKind =
 export type Fascia = 'crackle' | 'brushed' | 'body' | 'wood' | 'plastic' | 'ivory' | 'glass';
 
 /** Rakam karakteri (özel çizim fontun varyantları) */
-/** seg: eğik 7 segment (VFD) · flat: dik, düz 7 segment (LED) */
-export type GlyphStyle = 'classic' | 'bold' | 'thin' | 'seg' | 'flat' | 'italic';
+/** seg: eğik 7 segment (VFD) · flat: dik, düz 7 segment (LED) · serif: klasik kontrastlı serif (Cam HUD, Playfair Display Black) */
+export type GlyphStyle = 'classic' | 'bold' | 'thin' | 'seg' | 'flat' | 'italic' | 'serif';
 
 export interface Palette {
   /** Panel / ekran zemini */

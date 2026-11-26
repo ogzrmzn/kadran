@@ -16,7 +16,7 @@ import { STATUS_TEXT, useGps } from '@/features/kadran/useGps';
 
 
 /**
- * CAM HUD — nostaljik amber yansıtma
+ * CAM HUD — nostaljik amber yansıtma, klasik serif rakamlar
  * Telefon torpidoya yatırılır, ekran ön cama yansır. Ayna görüntü, saf siyah zemin, kalın amber rakamlar,
  * tek büyük hız. Işıma, sürekli animasyon ve küçük yazı yok: camda çift görüntü yapar ve göz yorar.
  */
@@ -56,7 +56,7 @@ export default function Windshield() {
   const barW = W * 0.7;
   const barStyle = useAnimatedStyle(() => ({ width: barW * frac.value }));
 
-  const glyph = 'bold' as const;
+  const glyph = 'serif' as const;
   const ratio = measureKd('188', 1, glyph);
   const extras = showClock || showDist || showTime;
   const numH = Math.min(H * (extras ? 0.44 : 0.56), (W * 0.84) / ratio) * nx.gaugeScale;
@@ -116,7 +116,7 @@ export default function Windshield() {
           <Animated.View style={over ? flashStyle : undefined}>
             <KdNumber text={speed == null ? '--' : String(speed)} height={numH} color={color} style={glyph} weightScale={1.1} />
           </Animated.View>
-          <View style={{ width: barW, height: Math.max(8, numH * 0.045), marginTop: numH * 0.1, backgroundColor: alpha(pal.primary, 0.14), alignItems: 'center' }}>
+          <View style={{ width: barW, height: Math.max(8, numH * 0.045), marginTop: numH * 0.17, backgroundColor: alpha(pal.primary, 0.14), alignItems: 'center' }}>
             <Animated.View style={[{ height: '100%', backgroundColor: over ? pal.danger : pal.primary }, barStyle]} />
           </View>
           <KdLabel color={speed == null ? pal.warn : pal.primary} size={auxH * 0.75} spacing={6} weight="800" style={{ marginTop: numH * 0.07 }}>

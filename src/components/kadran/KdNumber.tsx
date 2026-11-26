@@ -1,4 +1,5 @@
 import { memo } from 'react';
+import { Text, View } from 'react-native';
 import Svg, { G, Path } from 'react-native-svg';
 import type { GlyphStyle } from '@/features/kadran/themes';
 
@@ -71,6 +72,7 @@ const STYLES: Record<GlyphStyle, StyleDef> = {
   italic: { weight: 0.1, skew: 0.18 },
   seg: { weight: 0, skew: 0.12 },
   flat: { weight: 0, skew: 0 },
+  serif: { weight: 0, skew: 0 },
 };
 
 interface Built {
@@ -127,8 +129,15 @@ function box(width: number, st: StyleDef, weightScale: number) {
   return { sw, pad, vbW: width + 16 * st.skew + pad * 2, vbH: 16 + pad * 2 };
 }
 
+/** Klasik serif rakamlar: Playfair Display Black (uygulamayla birlikte gelir, _layout'ta yüklenir) */
+export const SERIF_FONT = 'PlayfairDisplay_900Black';
+/** Rakam yüksekliği / yazı boyutu (Playfair rakam yüksekliği ≈ 0.71 em) */
+const SERIF_CAP = 0.71;
+const serifAdvance = (ch: string) => (ch === ':' || ch === '.' ? 0.36 : ch === '-' ? 0.5 : 0.84);
+
 /** Verilen metnin bu yükseklikteki genişliği (yerleşim hesapları için) */
 export function measureKd(text: string, height: number, style: GlyphStyle = 'classic', weightScale = 1): number {
+  if (style === 'serif') return [...text].reduce((a, ch) => a + serifAdvance(ch), 0) * height;
   const b = box(pathFor(text, style).width, STYLES[style], weightScale);
   return (b.vbW / b.vbH) * height;
 }
@@ -155,6 +164,19 @@ export const KdNumber = memo(function KdNumber({
   /** Sönük segment rengi (seg); verilmezse rakam renginin çok soluğu */
   ghost?: string | null;
 }) {
+  if (style === 'serif') {
+    const fs = height / SERIF_CAP;
+    return (
+      <View style={{ height, justifyContent: 'center', opacity }}>
+        <Text
+          allowFontScaling={false}
+          style={{ fontFamily: SERIF_FONT, fontSize: fs, lineHeight: fs * 1.02, color, fontVariant: ['lining-nums'], includeFontPadding: false, textAlign: "center", marginVertical: -(fs - height) / 2, transform: [{ translateY: -height * 0.1 }] }}
+        >
+          {text}
+        </Text>
+      </View>
+    );
+  }
   const st = STYLES[style];
   const { d, ghost: gd, width } = pathFor(text, style);
   const { sw, pad, vbW, vbH } = box(width, st, weightScale);

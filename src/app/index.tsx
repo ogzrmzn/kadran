@@ -179,7 +179,7 @@ export default function Home() {
               width={cardW}
               title="Cam HUD"
               category="CAM YANSITMA · NOSTALJİ"
-              desc="Ön cama yansıtma · ayna görüntü · kalın amber rakamlar"
+              desc="Ön cama yansıtma · ayna görüntü · klasik serif amber rakamlar"
               bg="#000000"
               accent={wpal.primary}
               text={pal.text}
@@ -194,7 +194,7 @@ export default function Home() {
               preview={
                 <View style={{ alignItems: 'center' }}>
                   <View style={{ transform: [{ scaleX: -1 }] }}>
-                    <KdNumber text="88" height={96} color={wpal.primary} style="bold" weightScale={1.1} />
+                    <KdNumber text="88" height={92} color={wpal.primary} style="serif" />
                   </View>
                   <View style={{ width: 160, height: 7, marginTop: 14, backgroundColor: alpha(wpal.primary, 0.15), alignItems: 'center' }}>
                     <View style={{ width: 70, height: 7, backgroundColor: wpal.primary }} />

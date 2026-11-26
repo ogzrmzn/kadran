@@ -2,6 +2,7 @@ import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import * as SystemUI from 'expo-system-ui';
+import { PlayfairDisplay_900Black, useFonts } from '@expo-google-fonts/playfair-display';
 import { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { KadranProvider } from '@/features/kadran/KadranProvider';
@@ -14,10 +15,14 @@ function Root() {
   useEffect(() => {
     SystemUI.setBackgroundColorAsync(pal.bg).catch(() => {});
   }, [pal.bg]);
-  // Yerel açılış ekranı (KADRAN amblemi) ilk karede kapanır; ardından kontak animasyonu oynar
+  // Cam HUD'unun klasik serif rakamları; yüklenince (ya da hata olursa) açılış ekranı kapanır
+  const [fontsLoaded, fontError] = useFonts({ PlayfairDisplay_900Black });
+  const ready = fontsLoaded || !!fontError;
+  // Yerel açılış ekranı (KADRAN amblemi) kapanır; ardından kontak animasyonu oynar
   useEffect(() => {
-    SplashScreen.hideAsync().catch(() => {});
-  }, []);
+    if (ready) SplashScreen.hideAsync().catch(() => {});
+  }, [ready]);
+  if (!ready) return null;
   return (
     <>
       <StatusBar style="light" />
