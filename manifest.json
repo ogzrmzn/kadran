@@ -1,0 +1,29 @@
+{
+  "name": "KADRAN · Klasik Gösterge",
+  "short_name": "KADRAN",
+  "description": "Klasik araç göstergeleri: GPS hızıyla çalışan analog ve dijital kadranlar",
+  "start_url": "/kadran/",
+  "scope": "/kadran/",
+  "display": "fullscreen",
+  "orientation": "any",
+  "background_color": "#0B0806",
+  "theme_color": "#0B0806",
+  "icons": [
+    {
+      "src": "/kadran/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/kadran/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "/kadran/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
