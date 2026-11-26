@@ -675,7 +675,7 @@ const VfdGauge = memo(function VfdGauge({ speed, max, width, pal, unit, over, re
 //    krom at nalı çerçeve, LED ışın yelpazesi, gerçek analog ibre ve arkasında sönen hayalet izler,
 //    5×7 nokta vuruşlu amber rakamlar (tabela ampulü gibi), yolculuk maksimumunda halka işaret
 // ---------------------------------------------------------------------------
-const LV = { cx: 50, cy: 64, a0: 220, sw: 100, rays: 21, radii: [32, 36, 40, 44, 48] };
+const LV = { cx: 50, cy: 64, a0: 220, sw: 100, rays: 21, radii: [35, 39, 43, 47, 51] };
 /** 5×7 nokta vuruşlu rakamlar */
 const DOT5x7: Record<string, string[]> = {
   '0': ['01110', '10001', '10011', '10101', '11001', '10001', '01110'],
@@ -698,13 +698,13 @@ const LV_DOTS = Array.from({ length: LV.rays }, (_, i) => {
 
 /** İbre (pivot çevresinde döner; yalnızca r1..r2 arası çizilir: rakamların üstünden geçmez) */
 function VuNeedle({ f, k, delta = 0, opacity = 1, color, tip }: { f: SharedValue<number>; k: number; delta?: number; opacity?: number; color: string; tip: string }) {
-  const L = 51;
+  const L = 54;
   const style = useAnimatedStyle(() => ({ transform: [{ rotate: `${LV.a0 + LV.sw * Math.max(0, Math.min(1.01, f.value - delta))}deg` }] }));
   return (
     <Animated.View pointerEvents="none" style={[{ position: 'absolute', left: (LV.cx - L) * k, top: (LV.cy - L) * k, width: 2 * L * k, height: 2 * L * k, opacity }, style]}>
       <Svg width={2 * L * k} height={2 * L * k} viewBox={`${-L} ${-L} ${2 * L} ${2 * L}`}>
-        <Path d="M29.5 -0.45 L44 -0.3 L44 0.3 L29.5 0.45 Z" fill={color} />
-        <Path d="M44 -0.3 L50 -0.18 L50 0.18 L44 0.3 Z" fill={tip} />
+        <Path d="M33 -0.45 L47 -0.3 L47 0.3 L33 0.45 Z" fill={color} />
+        <Path d="M47 -0.3 L53 -0.18 L53 0.18 L47 0.3 Z" fill={tip} />
       </Svg>
     </Animated.View>
   );
@@ -722,12 +722,13 @@ const LedGauge = memo(function LedGauge({ speed, max, width, pal, unit, over, re
   const amber = over ? pal.danger : pal.text;
   const hot = over ? '#FFD0C8' : pal.secondary;
   const unlit = pal.dim;
-  // 5×7 rakamlar
-  const txt = (shown == null ? '--' : String(shown)).padStart(3, ' ').slice(-3);
-  const P = 1.8;
-  const digW = 5 * P + 1.8;
-  const x0 = LV.cx - (3 * digW - 1.8) / 2 + P / 2;
-  const y0 = 37.4;
+  // 5×7 rakamlar: yalnızca gerçek basamaklar çizilir, blok tam ortada (pivotun üstünde)
+  const txt = (shown == null ? '--' : String(shown)).slice(-3);
+  const P = 2.05;
+  const digW = 6 * P;
+  const blockW = txt.length * digW - P; // son basamaktan sonra boşluk yok
+  const x0 = LV.cx - blockW / 2 + P / 2;
+  const y0 = 41.6 - 3 * P;
   const dotsOn: { x: number; y: number }[] = [];
   const dotsOff: { x: number; y: number }[] = [];
   [...txt].forEach((ch, di) => {
@@ -744,8 +745,8 @@ const LedGauge = memo(function LedGauge({ speed, max, width, pal, unit, over, re
         <ChromeDefs id={id} pal={pal} />
         <Rect x={0.5} y={0.5} width={99} height={69} rx={5} fill={pal.face} stroke={alpha(pal.chrome, 0.5)} strokeWidth={0.5} />
         {/* krom at nalı */}
-        <Path d={arc(LV.cx, LV.cy, 56.5, 208, 332)} stroke={mix(pal.chrome, '#FFFFFF', 0.5)} strokeWidth={1.1} fill="none" />
-        <Path d={arc(LV.cx, LV.cy, 55.2, 208, 332)} stroke={shade(pal.chrome, 0.55)} strokeWidth={0.8} fill="none" />
+        <Path d={arc(LV.cx, LV.cy, 59, 212, 328)} stroke={mix(pal.chrome, '#FFFFFF', 0.5)} strokeWidth={1.1} fill="none" />
+        <Path d={arc(LV.cx, LV.cy, 57.8, 212, 328)} stroke={shade(pal.chrome, 0.55)} strokeWidth={0.8} fill="none" />
         {/* LED ışın yelpazesi: ibreye yakın ışınlar daha sıcak (kuyruklu yıldız) */}
         {LV_DOTS.map((ray, i) => {
           const on = i <= lit;
@@ -763,7 +764,7 @@ const LedGauge = memo(function LedGauge({ speed, max, width, pal, unit, over, re
         {/* yolculuk maksimumu: en dış noktada halka */}
         {peakRay >= 0 ? <Circle cx={LV_DOTS[peakRay][4][0]} cy={LV_DOTS[peakRay][4][1]} r={1.9} stroke={pal.holo} strokeWidth={0.4} fill="none" /> : null}
         {[0, 5, 10, 15, 20].map((i) => {
-          const [x, y] = pt(LV.cx, LV.cy, 52.2, LV.a0 + (LV.sw * i) / (LV.rays - 1));
+          const [x, y] = pt(LV.cx, LV.cy, 55.2, LV.a0 + (LV.sw * i) / (LV.rays - 1));
           return <DialNum key={i} text={String(Math.round((max * i) / 20))} x={x} y={y} h={2.6} color={alpha(pal.text, 0.75)} style="classic" cond={0.8} />;
         })}
         {/* hız uyarı lambası */}
@@ -777,18 +778,18 @@ const LedGauge = memo(function LedGauge({ speed, max, width, pal, unit, over, re
         </Label>
         {/* 5×7 nokta vuruşlu hız */}
         {dotsOff.map((p, i) => (
-          <Circle key={`o${i}`} cx={p.x} cy={p.y} r={0.68} fill={unlit} opacity={0.55} />
+          <Circle key={`o${i}`} cx={p.x} cy={p.y} r={0.75} fill={unlit} opacity={0.55} />
         ))}
         {dotsOn.map((p, i) => (
-          <Circle key={`g${i}`} cx={p.x} cy={p.y} r={1.25} fill={amber} opacity={0.25} />
+          <Circle key={`g${i}`} cx={p.x} cy={p.y} r={1.4} fill={amber} opacity={0.25} />
         ))}
         {dotsOn.map((p, i) => (
-          <Circle key={`n${i}`} cx={p.x} cy={p.y} r={0.72} fill={mix(amber, hot, 0.35)} />
+          <Circle key={`n${i}`} cx={p.x} cy={p.y} r={0.8} fill={mix(amber, hot, 0.35)} />
         ))}
         {/* isim plakası */}
         <Rect x={2} y={52.5} width={96} height={16} rx={2} fill={shade(pal.face, 0.6)} />
         <Path d="M2 52.5 H98" stroke={pal.chrome} strokeWidth={0.5} />
-        <Path d={`M${LV.cx - 4.5} 52.6 A4.5 4.5 0 0 1 ${LV.cx + 4.5} 52.6 Z`} fill={`url(#${id}c)`} />
+        <Path d={`M${LV.cx - 3.4} 52.6 A3.4 3.4 0 0 1 ${LV.cx + 3.4} 52.6 Z`} fill={`url(#${id}c)`} />
         <Label x={6} y={60} size={2.2} color={alpha(pal.text, 0.6)} anchor="start" spacing={0.6}>
           TRIP
         </Label>
