@@ -1,0 +1,505 @@
+import { router } from 'expo-router';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Platform, Pressable, ScrollView, StyleSheet, useWindowDimensions, View, type ScrollViewInstance } from 'react-native';
+import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { unitLabel } from '@/features/kadran/format';
+import { ALERT_MAX, ALERT_STEP, DEFAULT_SETTINGS, THEME_IDS, type DayNight, type Orientation, type WidgetKey } from '@/features/kadran/settings';
+import { ACCENTS, alpha, SPEED_COLORS, THEMES, type Palette } from '@/features/kadran/themes';
+import { isFullscreen, lockOrientationWeb, toggleFullscreen } from '@/features/kadran/useHudSystem';
+import { hhmm } from '@/features/kadran/sun';
+import { useKadran } from '@/features/kadran/useKadran';
+import { HudButton, KdIcon, KdLabel, KdSwitch, OptionCards, Segmented, Stepper } from './primitives';
+
+const BRIGHT_STEPS = [0.1, 0.25, 0.5, 0.75, 1];
+
+/** Panelin kaldığı kaydırma yeri (uygulama açık kaldıkça hatırlanır; panel kapanıp açılınca oradan devam eder) */
+let lastPanelScroll = 0;
+
+const WIDGETS: [WidgetKey, string][] = [
+  ['clock', 'Saat'],
+  ['tripTime', 'Yolculuk süresi'],
+  ['distance', 'Kat edilen mesafe'],
+  ['avg', 'Ortalama hız (panel)'],
+  ['max', 'Maksimum hız (panel)'],
+  ['compass', 'Pusula / yön (panel)'],
+  ['gps', 'GPS sinyali'],
+  ['weather', 'Hava durumu (panel, internet)'],
+];
+
+/**
+ * Web'de tarayıcı ekran parlaklığını değiştiremez: seçilen parlaklık, ekranın üstüne binen siyah bir
+ * katmanla (yazılımsal karartma) uygulanır. Telefon uygulamasında gerçek parlaklık kullanılır.
+ */
+export function DimOverlay({ brightness }: { brightness: number | null }) {
+  if (Platform.OS !== 'web' || brightness == null || brightness >= 1) return null;
+  return <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: '#000', opacity: (1 - brightness) * 0.85 }]} />;
+}
+
+function Section({ title, hint, children, pal }: { title: string; hint?: string; children: ReactNode; pal: Palette }) {
+  return (
+    <View style={{ marginTop: 20, gap: 8 }}>
+      <KdLabel color={pal.primary} size={10} spacing={2.5}>
+        {title}
+      </KdLabel>
+      {children}
+      {hint ? (
+        <KdLabel color={pal.dim} size={9.5} spacing={0.3} numberOfLines={3} style={{ textTransform: 'none' }}>
+          {hint}
+        </KdLabel>
+      ) : null}
+    </View>
+  );
+}
+
+function SwitchRow({ label, hint, value, onChange, pal }: { label: string; hint?: string; value: boolean; onChange: (v: boolean) => void; pal: Palette }) {
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 4 }}>
+      <View style={{ flex: 1 }}>
+        <KdLabel color={pal.text} size={11} spacing={0.8} style={{ textTransform: 'none' }} numberOfLines={2}>
+          {label}
+        </KdLabel>
+        {hint ? (
+          <KdLabel color={pal.dim} size={9} spacing={0.3} style={{ textTransform: 'none', marginTop: 2 }} numberOfLines={3}>
+            {hint}
+          </KdLabel>
+        ) : null}
+      </View>
+      <KdSwitch pal={pal} value={value} onChange={onChange} />
+    </View>
+  );
+}
+
+/**
+ * Tüm ayarlar tek yerde: sağdan açılan panel ve Ayarlar sayfası aynı içeriği kullanır.
+ * mode: hangi HUD ekranından açıldığı (tema seçimi o ekrana geçiş yapar); yoksa Ayarlar sayfası.
+ */
+export function ControlContent({ mode, onNavigate }: { mode?: 'cam' | 'kokpit'; onNavigate?: () => void }) {
+  const { nx, upal: pal, light, sun, update } = useKadran();
+  const now = light >= 0.999 ? 'şu an gündüz' : light <= 0.001 ? 'şu an gece' : 'şu an geçişte';
+  const lightHint =
+    nx.dayNight === 'gunduz'
+      ? 'Gün ışığında okunan kadran: açık rakamlar, parlak ibre.'
+      : nx.dayNight === 'gece'
+        ? 'Klasik gösterge aydınlatması (yeşil, amber…); parlaklık hafifçe kısılır.'
+        : sun?.polar
+          ? `Konumunuzda güneş bugün ${sun.polar === 'day' ? 'batmıyor' : 'doğmuyor'} · ${now}.`
+          : sun
+            ? `Gün doğumu ${hhmm(sun.sunrise)} · gün batımı ${hhmm(sun.sunset)} (konumunuza göre, internetsiz hesaplanır). Geçişte renkler ve parlaklık yavaşça değişir · ${now}.`
+            : `Konum henüz bilinmiyor; bir sürüş ekranında GPS bağlanınca güneş saatleri hesaplanır. Şimdilik 07:00 / 19:00 · ${now}.`;
+  const web = Platform.OS === 'web';
+  const alertTxt = nx.speedAlert === 0 ? 'KAPALI' : `${nx.speedAlert} ${unitLabel(nx.unit)}`;
+  const bIdx = nx.brightness == null ? -1 : BRIGHT_STEPS.findIndex((v) => Math.abs(v - nx.brightness!) < 0.01);
+  const stepBright = (d: number) => {
+    // -1 = sistem parlaklığı; ardından %10 … %100
+    const cur = bIdx < 0 && nx.brightness != null ? BRIGHT_STEPS.length - 1 : bIdx;
+    const i = Math.min(BRIGHT_STEPS.length - 1, Math.max(-1, cur + d));
+    update({ brightness: i < 0 ? null : BRIGHT_STEPS[i] });
+  };
+  const brightTxt = nx.brightness == null ? (web ? 'KARARTMA YOK' : 'SİSTEM') : `%${Math.round(nx.brightness * 100)}`;
+  const orientRow = (label: string, value: Orientation, set: (o: Orientation) => void) => (
+    <View style={{ gap: 6 }}>
+      {label ? (
+        <KdLabel color={pal.dim} size={9} spacing={1.5}>
+          {label}
+        </KdLabel>
+      ) : null}
+      <OptionCards<Orientation>
+        pal={pal}
+        value={value}
+        onChange={set}
+        options={[
+          { value: 'yatay', label: 'YATAY', icon: 'phone-rotate-landscape' },
+          { value: 'dikey', label: 'DİKEY', icon: 'phone-rotate-portrait' },
+        ]}
+      />
+    </View>
+  );
+
+  const mirrorRow = (label: string, value: 'normal' | 'ust' | 'alt', set: (v: 'normal' | 'ust' | 'alt') => void) => (
+    <View style={{ gap: 6 }}>
+      {label ? (
+        <KdLabel color={pal.dim} size={9} spacing={1.5}>
+          {label}
+        </KdLabel>
+      ) : null}
+      <Segmented
+        pal={pal}
+        value={value}
+        onChange={set}
+        options={[
+          { value: 'normal', label: 'NORMAL' },
+          { value: 'ust', label: 'ÜST KENAR CAMA' },
+          { value: 'alt', label: 'ALT KENAR CAMA' },
+        ]}
+      />
+    </View>
+  );
+
+  return (
+    <>
+      <Section title="TEMA" hint={mode ? 'Temaya dokunun; ekran hemen o temaya geçer.' : 'Temaya dokunun; o tema açılır.'} pal={pal}>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+          {(['windshield', ...THEME_IDS] as const).map((id) => {
+            const isCam = id === 'windshield';
+            const name = isCam ? 'Cam HUD' : THEMES[id].name;
+            const view = mode ?? nx.lastView;
+            const on = isCam ? view === 'cam' : view === 'kokpit' && id === nx.theme;
+            const c = isCam ? '#FFB347' : THEMES[id].day.needle;
+            return (
+              <Pressable
+                key={id}
+                onPress={() => {
+                  // Seçilen tema hemen açılır: panelden ekran değişir, Ayarlar sayfasından tema ekranına geçilir
+                  if (isCam) {
+                    update({ lastView: 'cam' });
+                    if (mode !== 'cam') {
+                      onNavigate?.();
+                      router.replace('/cam');
+                    }
+                    return;
+                  }
+                  update({ theme: id, lastView: 'kokpit' });
+                  if (mode !== 'kokpit') {
+                    onNavigate?.();
+                    router.replace('/kokpit');
+                  }
+                }}
+                accessibilityRole="button"
+                accessibilityState={{ selected: on }}
+                style={{
+                  flexBasis: '47%',
+                  flexGrow: 1,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 8,
+                  paddingVertical: 11,
+                  paddingHorizontal: 10,
+                  borderRadius: 4,
+                  borderWidth: 1,
+                  borderColor: on ? pal.primary : alpha(pal.primary, 0.2),
+                  backgroundColor: on ? alpha(pal.primary, 0.16) : pal.glass,
+                }}
+              >
+                <View style={{ width: 12, height: 12, borderRadius: 6, borderWidth: 2, borderColor: alpha(pal.chrome, 0.8), backgroundColor: c }} />
+                <View style={{ flex: 1 }}>
+                  <KdLabel color={on ? pal.primary : pal.text} size={13} spacing={0.3} serif>
+                    {name}
+                  </KdLabel>
+                  <KdLabel color={pal.dim} size={8} spacing={0.8}>
+                    {isCam ? 'CAM YANSITMA' : THEMES[id].era}
+                  </KdLabel>
+                </View>
+              </Pressable>
+            );
+          })}
+        </View>
+      </Section>
+
+      <Section title="DİJİTAL HIZ PENCERESİ" hint="Analog kadranların içinde küçük bir pencerede hız rakamla da yazılır. Kapalıyken yalnızca ibre (klasik görünüm)." pal={pal}>
+        <Segmented
+          pal={pal}
+          value={nx.digitalAssist ? 'acik' : 'kapali'}
+          onChange={(v) => update({ digitalAssist: v === 'acik' })}
+          options={[
+            { value: 'kapali', label: 'YALNIZ İBRE' },
+            { value: 'acik', label: 'İBRE + RAKAM' },
+          ]}
+        />
+      </Section>
+
+      <Section title="ANİMASYON" hint="Kapalıyken ibre yaylanmadan, kısa geçişle hareket eder ve kontak animasyonu kısalır (pil tasarrufu)." pal={pal}>
+        <Segmented
+          pal={pal}
+          value={nx.motion}
+          onChange={(v) => update({ motion: v })}
+          options={[
+            { value: 'tam', label: 'AÇIK' },
+            { value: 'az', label: 'KAPALI' },
+          ]}
+        />
+      </Section>
+
+      <Section
+        title="CAMA YANSIT"
+        hint="Telefonu cama yakın yatırın. Camdaki yazı düz okunmuyorsa diğer kenar seçeneğini deneyin."
+        pal={pal}
+      >
+        {mode === 'cam' || !mode
+          ? mirrorRow(mode ? '' : 'CAM HUD', nx.mirror ? nx.mirrorAxis : 'normal', (v) => update(v === 'normal' ? { mirror: false } : { mirror: true, mirrorAxis: v }))
+          : null}
+        {mode === 'kokpit' || !mode
+          ? mirrorRow(mode ? '' : 'GÖSTERGE PANELİ', nx.cockpitMirror ? nx.mirrorAxis : 'normal', (v) =>
+              update(v === 'normal' ? { cockpitMirror: false } : { cockpitMirror: true, mirrorAxis: v }),
+            )
+          : null}
+      </Section>
+
+      <Section
+        title="EKRAN YÖNÜ"
+        hint={web ? 'Yönü seçince ekran tam ekrana geçer ve o yönde kilitlenir; virajda dönmez. (Tarayıcılar kilide yalnızca tam ekranda izin verir.)' : 'Seçtiğiniz yönde ekran kilitlenir; virajda ve yokuşta dönmez.'}
+        pal={pal}
+      >
+        {mode === 'cam' || !mode ? orientRow(mode ? '' : 'CAM HUD', nx.camOrientation, (o) => {
+              update({ camOrientation: o });
+              if (mode) lockOrientationWeb(o);
+            }) : null}
+        {mode === 'kokpit' || !mode ? orientRow(mode ? '' : 'GÖSTERGE PANELİ', nx.cockpitOrientation, (o) => {
+              update({ cockpitOrientation: o });
+              if (mode) lockOrientationWeb(o);
+            }) : null}
+      </Section>
+
+      <Section title="HIZ UYARISI" hint="Bu hızı geçince ibre kırmızıya döner, uyarı lambası yanar ve telefon bir kez titrer." pal={pal}>
+        <Stepper
+          pal={pal}
+          value={alertTxt}
+          minusDisabled={nx.speedAlert <= 0}
+          plusDisabled={nx.speedAlert >= ALERT_MAX}
+          onMinus={() => update({ speedAlert: Math.max(0, nx.speedAlert - ALERT_STEP) })}
+          onPlus={() => update({ speedAlert: Math.min(ALERT_MAX, nx.speedAlert + ALERT_STEP) })}
+        />
+      </Section>
+
+      <Section
+        title="PARLAKLIK"
+        hint={
+          web
+            ? 'Tarayıcı ekran parlaklığını değiştiremez; HUD ekranı seçtiğiniz oranda karartılır. Gece camdaki parlamayı azaltır.'
+            : 'HUD ekranındayken uygulanır; çıkınca sistem parlaklığına döner.'
+        }
+        pal={pal}
+      >
+        <Stepper
+          pal={pal}
+          value={brightTxt}
+          minusDisabled={nx.brightness == null}
+          plusDisabled={nx.brightness != null && nx.brightness >= 1}
+          onMinus={() => stepBright(-1)}
+          onPlus={() => stepBright(1)}
+        />
+      </Section>
+
+      <Section title="IŞIK" hint={lightHint} pal={pal}>
+        <OptionCards<DayNight>
+          pal={pal}
+          value={nx.dayNight}
+          onChange={(v) => update({ dayNight: v })}
+          options={[
+            { value: 'gunduz', label: 'GÜNDÜZ', icon: 'white-balance-sunny' },
+            { value: 'gece', label: 'GECE', icon: 'weather-night' },
+            { value: 'oto', label: 'GÜNEŞE GÖRE', icon: 'theme-light-dark' },
+          ]}
+        />
+      </Section>
+
+      <Section title="RAKAM RENGİ" hint="Kadran rakamları, çizgileri ve dijital ekranların rengi. 'Tema' seçiliyken gündüz/gece aydınlatması temaya göre değişir." pal={pal}>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+          {SPEED_COLORS.map((c) => {
+            const on = nx.speedColor === c.color;
+            const sw = c.color ?? THEMES[nx.theme].night.text;
+            return (
+              <Pressable
+                key={c.name}
+                onPress={() => update({ speedColor: c.color })}
+                accessibilityRole="button"
+                accessibilityLabel={`Hız rengi ${c.name}`}
+                accessibilityState={{ selected: on }}
+                style={{ alignItems: 'center', gap: 4, width: 46 }}
+              >
+                <View
+                  style={{
+                    width: 38,
+                    height: 38,
+                    borderRadius: 6,
+                    backgroundColor: '#05070C',
+                    borderWidth: on ? 2 : 1,
+                    borderColor: on ? pal.text : alpha(pal.primary, 0.3),
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <KdLabel color={sw} size={15} spacing={0} weight="800">
+                    88
+                  </KdLabel>
+                </View>
+                <KdLabel color={on ? pal.text : pal.dim} size={7.5} spacing={0.3}>
+                  {c.name}
+                </KdLabel>
+              </Pressable>
+            );
+          })}
+        </View>
+      </Section>
+
+      <Section title="İBRE RENGİ" hint="Analog ibrenin ve cam HUD'u çubuğunun rengi." pal={pal}>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+          {[{ name: 'Tema', color: null as string | null }, ...ACCENTS].map((a) => {
+            const on = nx.accent === a.color;
+            const sw = a.color ?? THEMES[nx.theme].day.needle;
+            return (
+              <Pressable
+                key={a.name}
+                onPress={() => update({ accent: a.color })}
+                accessibilityRole="button"
+                accessibilityLabel={`Renk ${a.name}`}
+                accessibilityState={{ selected: on }}
+                hitSlop={4}
+                style={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: 19,
+                  backgroundColor: sw,
+                  borderWidth: on ? 3 : a.color ? 0 : 2,
+                  borderColor: pal.text,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                {a.color ? null : <KdIcon name="palette-outline" size={16} color="#000" />}
+              </Pressable>
+            );
+          })}
+        </View>
+      </Section>
+
+      <Section title="GÖSTERGE BOYUTU" pal={pal}>
+        <Segmented<number>
+          pal={pal}
+          value={nx.gaugeScale}
+          onChange={(v) => update({ gaugeScale: v })}
+          options={[
+            { value: 0.8, label: 'S' },
+            { value: 0.9, label: 'M' },
+            { value: 1, label: 'L' },
+            { value: 1.15, label: 'XL' },
+          ]}
+        />
+      </Section>
+
+      <Section title="BİRİM" pal={pal}>
+        <Segmented
+          pal={pal}
+          value={nx.unit}
+          onChange={(v) => update({ unit: v, speedAlert: 0 })}
+          options={[
+            { value: 'kmh', label: 'KM/H' },
+            { value: 'mph', label: 'MPH' },
+          ]}
+        />
+      </Section>
+
+      <Section title="GÖSTERİLECEK BİLGİLER" hint="Cam HUD'unda saat üstte, süre ve mesafe altta görünür; diğerleri gösterge paneli içindir. Kilometre sayacı yolculuk mesafesini gösterir." pal={pal}>
+        {WIDGETS.map(([k, label]) => (
+          <SwitchRow key={k} label={label} pal={pal} value={nx.widgets[k]} onChange={(v) => update({ widgets: { ...nx.widgets, [k]: v } })} />
+        ))}
+      </Section>
+
+      <Section title="DİĞER" pal={pal}>
+        <SwitchRow label="Ekran açık kalsın" hint="Gösterge ekranındayken ekran kararmaz" pal={pal} value={nx.keepAwake} onChange={(v) => update({ keepAwake: v })} />
+        <SwitchRow
+          label="Demo verisi"
+          hint="GPS yokken arayüzü denemek için yapay hız üretir. Açıkken ekranda sürekli DEMO uyarısı görünür; gerçek hız değildir."
+          pal={pal}
+          value={nx.demo}
+          onChange={(v) => update({ demo: v })}
+        />
+      </Section>
+
+      <View style={{ marginTop: 24, alignItems: 'flex-start' }}>
+        <HudButton icon="backup-restore" label="VARSAYILANLARA DÖN" pal={pal} onPress={() => update({ ...DEFAULT_SETTINGS, lastView: nx.lastView })} />
+      </View>
+    </>
+  );
+}
+
+/** Sağdan açılan kontrol paneli: HUD ve kokpitten çıkmadan tüm ayarlar. Cam modunda aynalanmaz. */
+export function HudDrawer({ mode, open, onClose }: { mode: 'cam' | 'kokpit'; open: boolean; onClose: () => void }) {
+  const { nx, upal: pal } = useKadran();
+  const insets = useSafeAreaInsets();
+  const { width, height } = useWindowDimensions();
+  const landscape = width > height;
+  const panelW = Math.min(420, width * (landscape ? 0.55 : 0.92));
+  const x = useSharedValue(1);
+  const [mounted, setMounted] = useState(open);
+  const [fs, setFs] = useState(isFullscreen());
+  const scrollRef = useRef<ScrollViewInstance>(null);
+  const restored = useRef(false);
+
+  useEffect(() => {
+    if (open) {
+      restored.current = false;
+      setMounted(true);
+    }
+    x.value = withTiming(open ? 0 : 1, { duration: 260, easing: Easing.out(Easing.cubic) });
+    if (!open) {
+      const t = setTimeout(() => setMounted(false), 280);
+      return () => clearTimeout(t);
+    }
+  }, [open, x]);
+
+  const panelStyle = useAnimatedStyle(() => ({ transform: [{ translateX: x.value * (panelW + 20) }] }));
+  // Arka plan yalnızca hafifçe kararır: panel açıkken yapılan değişiklikler arkada görünür
+  const backStyle = useAnimatedStyle(() => ({ opacity: (1 - x.value) * 0.12 }));
+
+  if (!mounted) return null;
+  const orient: Orientation = mode === 'cam' ? nx.camOrientation : nx.cockpitOrientation;
+
+  return (
+    <View style={StyleSheet.absoluteFill} pointerEvents={open ? 'auto' : 'none'}>
+      <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }, backStyle]}>
+        <Pressable style={{ flex: 1 }} onPress={onClose} accessibilityLabel="Paneli kapat" />
+      </Animated.View>
+      <Animated.View
+        style={[
+          {
+            position: 'absolute',
+            top: 0,
+            bottom: 0,
+            right: 0,
+            width: panelW + insets.right,
+            // Yarı saydam cam panel
+            backgroundColor: alpha(pal.bg, 0.94),
+            borderLeftWidth: 1,
+            borderColor: alpha(pal.primary, 0.45),
+            paddingRight: insets.right,
+          },
+          panelStyle,
+        ]}
+      >
+        <View style={{ position: 'absolute', left: 0, top: 24, bottom: 24, width: 2, backgroundColor: pal.primary, opacity: 0.7 }} />
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: insets.top + 12, paddingHorizontal: 16, paddingBottom: 8 }}>
+          <View style={{ flex: 1 }}>
+            <KdLabel color={pal.primary} size={9} spacing={2.5}>
+              {mode === 'cam' ? 'CAM HUD' : 'GÖSTERGE PANELİ'}
+            </KdLabel>
+            <KdLabel color={pal.text} size={19} spacing={0.5} serif weight="700">
+              Kontrol Paneli
+            </KdLabel>
+          </View>
+          {Platform.OS === 'web' ? (
+            <HudButton icon={fs ? 'fullscreen-exit' : 'fullscreen'} pal={pal} size={40} onPress={() => toggleFullscreen(orient).then(() => setFs(isFullscreen()))} />
+          ) : null}
+          <HudButton icon="close" pal={pal} size={40} onPress={onClose} label={undefined} />
+        </View>
+        <ScrollView
+          ref={scrollRef}
+          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: insets.bottom + 28 }}
+          scrollEventThrottle={32}
+          onScroll={(e) => {
+            lastPanelScroll = e.nativeEvent.contentOffset.y;
+          }}
+          onContentSizeChange={() => {
+            // İlk çizimde kaldığı yere dön (bir kez)
+            if (!restored.current && lastPanelScroll > 0) {
+              restored.current = true;
+              scrollRef.current?.scrollTo({ y: lastPanelScroll, animated: false });
+            }
+          }}
+        >
+          <ControlContent mode={mode} onNavigate={onClose} />
+        </ScrollView>
+      </Animated.View>
+    </View>
+  );
+}

@@ -1,0 +1,107 @@
+/**
+ * KADRAN ayarları. Tek bir `kadran.settings` anahtarı altında saklanır;
+ * eksik/eski alanlar her okumada varsayılanlarla tamamlanır.
+ */
+
+export type ThemeId = 'anadolu' | 'serit' | 'krom' | 'tambur' | 'termometre' | 'roadster' | 'vfd' | 'led';
+export type Orientation = 'yatay' | 'dikey';
+/** Cam modunda aynalama: telefonun hangi kenarı cama bakıyor */
+export type MirrorAxis = 'ust' | 'alt';
+export type SpeedUnit = 'kmh' | 'mph';
+export type DayNight = 'oto' | 'gunduz' | 'gece';
+export type Motion = 'tam' | 'az';
+
+export type WidgetKey = 'clock' | 'tripTime' | 'avg' | 'max' | 'distance' | 'compass' | 'gps' | 'weather';
+
+export interface KadranSettings {
+  theme: ThemeId;
+  /** İbre rengi; null = temanın kendi ibresi */
+  accent: string | null;
+  /** Kadran rakamlarının rengi; null = temanın kendi rengi */
+  speedColor: string | null;
+  unit: SpeedUnit;
+  /** Gösterge boyutu (0.75 – 1.15) */
+  gaugeScale: number;
+  widgets: Record<WidgetKey, boolean>;
+  dayNight: DayNight;
+  /** Analog kadranların içinde küçük dijital hız penceresi */
+  digitalAssist: boolean;
+  /** Cam modunda ters (ayna) görünüm */
+  mirror: boolean;
+  /** Kokpit temalarında cama yansıtma (telefon ekranında kullanım için varsayılan kapalı) */
+  cockpitMirror: boolean;
+  /** Ayna yönü: 'ust' = üst kenar cama (sağ-sol çevrilir), 'alt' = alt kenar cama (alt-üst çevrilir) */
+  mirrorAxis: MirrorAxis;
+  /** Seçilen yön ekranı o yönde kilitler */
+  camOrientation: Orientation;
+  cockpitOrientation: Orientation;
+  /** Ekranın kapanmasını engelle */
+  keepAwake: boolean;
+  /** Ekran parlaklığı 0.1–1; null = sistem parlaklığı (web'de ekran karartılarak uygulanır) */
+  brightness: number | null;
+  /** Hız uyarısı (seçili birimde); 0 = kapalı */
+  speedAlert: number;
+  /** Animasyon yoğunluğu (pil tasarrufu için "az") */
+  motion: Motion;
+  /** Açıkça işaretlenen demo verisi (gerçek GPS yerine) */
+  demo: boolean;
+  /** Son bilinen konum (yaklaşık; güneşe göre ışık için) */
+  lastPos: { lat: number; lon: number } | null;
+  /** Son açılan ekran (ana sayfada işaretlenir) */
+  lastView: 'cam' | 'kokpit';
+}
+
+export const DEFAULT_SETTINGS: KadranSettings = {
+  theme: 'anadolu',
+  accent: null,
+  speedColor: null,
+  unit: 'kmh',
+  gaugeScale: 1,
+  widgets: { clock: true, tripTime: true, avg: true, max: true, distance: true, compass: true, gps: true, weather: false },
+  dayNight: 'oto',
+  digitalAssist: false,
+  mirror: true,
+  mirrorAxis: 'ust',
+  cockpitMirror: false,
+  camOrientation: 'yatay',
+  cockpitOrientation: 'yatay',
+  keepAwake: true,
+  brightness: 1,
+  speedAlert: 0,
+  motion: 'tam',
+  demo: false,
+  lastView: 'kokpit',
+  lastPos: null,
+};
+
+export const THEME_IDS: ThemeId[] = ['anadolu', 'serit', 'krom', 'roadster', 'tambur', 'termometre', 'vfd', 'led'];
+
+/** Hız uyarısı adımı ve sınırları (seçili birimde) */
+export const ALERT_STEP = 10;
+export const ALERT_MAX = 250;
+
+const HEX = /^#[0-9A-Fa-f]{6}$/;
+
+/** Kayıtlı (belki eski/eksik) değeri güvenli ayara çevirir */
+export function resolveSettings(raw: unknown): KadranSettings {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Partial<KadranSettings>;
+  const out: KadranSettings = { ...DEFAULT_SETTINGS, ...r, widgets: { ...DEFAULT_SETTINGS.widgets, ...(r.widgets ?? {}) } };
+  if (!THEME_IDS.includes(out.theme)) out.theme = DEFAULT_SETTINGS.theme;
+  if (out.unit !== 'kmh' && out.unit !== 'mph') out.unit = 'kmh';
+  if (typeof out.gaugeScale !== 'number' || !Number.isFinite(out.gaugeScale)) out.gaugeScale = 1;
+  out.gaugeScale = Math.min(1.15, Math.max(0.75, out.gaugeScale));
+  if (out.brightness != null) out.brightness = Math.min(1, Math.max(0.1, Number(out.brightness) || 1));
+  if (!['oto', 'gunduz', 'gece'].includes(out.dayNight)) out.dayNight = 'oto';
+  if (out.motion !== 'az') out.motion = 'tam';
+  out.digitalAssist = out.digitalAssist === true;
+  out.speedAlert = Math.min(ALERT_MAX, Math.max(0, Math.round(Number(out.speedAlert) || 0)));
+  if (out.speedColor !== null && !HEX.test(String(out.speedColor))) out.speedColor = null;
+  if (out.accent !== null && !HEX.test(String(out.accent))) out.accent = null;
+  if (out.lastView !== 'cam') out.lastView = 'kokpit';
+  const lp = out.lastPos as { lat?: unknown; lon?: unknown } | null;
+  if (!lp || typeof lp.lat !== 'number' || typeof lp.lon !== 'number') out.lastPos = null;
+  if (out.mirrorAxis !== 'alt') out.mirrorAxis = 'ust';
+  if (out.camOrientation !== 'dikey') out.camOrientation = 'yatay';
+  if (out.cockpitOrientation !== 'dikey') out.cockpitOrientation = 'yatay';
+  return out;
+}

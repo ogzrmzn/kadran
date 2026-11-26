@@ -1,0 +1,869 @@
+import { memo, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { StyleSheet, View } from 'react-native';
+import Animated, { Easing, useAnimatedStyle, useSharedValue, withSpring, withTiming, type SharedValue } from 'react-native-reanimated';
+import Svg, { Circle, Defs, G, LinearGradient, Path, RadialGradient, Rect, Stop, Text as SvgText } from 'react-native-svg';
+import { alpha, mix, shade, type GaugeKind, type GlyphStyle, type Palette } from '@/features/kadran/themes';
+import { glyphPath } from './KdNumber';
+import { LABEL_FONT } from './primitives';
+
+/**
+ * Klasik göstergeler. Kadranlar statik SVG olarak bir kez çizilir; yalnızca ibre (ya da tambur/sütun)
+ * UI thread'de döner/kayar. İbre yaylı bir sönümle (mekanik ibre hissi) hedefe gider.
+ */
+
+export type Signal = 'ok' | 'weak' | 'none';
+
+export interface GaugeProps {
+  /** Seçili birimde hız; güvenilir veri yoksa null */
+  speed: number | null;
+  /** Skala sonu */
+  max: number;
+  /** Göstergenin genişliği (yükseklik geometriye göre) */
+  width: number;
+  pal: Palette;
+  glyph: GlyphStyle;
+  unit: string;
+  /** Hız uyarısı aşıldı */
+  over?: boolean;
+  /** "az": geçişler kısa */
+  reduced?: boolean;
+  /** Göstergenin üstüne binen içerik (ör. GPS arama animasyonu) */
+  center?: ReactNode;
+  /** Analog kadranda küçük dijital hız penceresi */
+  assist?: boolean;
+  /** Analog saat için zaman (ms) */
+  now?: number;
+  /** Kilometre sayacı (yolculuk mesafesi) metni, ör. "12.4"; null = "--" */
+  odo?: string | null;
+  /** Uyarı lambaları için GPS durumu */
+  signal?: Signal;
+}
+
+/** Göstergenin yükseklik/genişlik oranı */
+export const GAUGE_ASPECT: Record<GaugeKind, number> = { twin: 0.5, ribbon: 0.48, fan: 0.64, sport: 0.88, drum: 0.52, column: 1.2, vfd: 0.66, led: 0.52 };
+
+const D2R = Math.PI / 180;
+const pt = (cx: number, cy: number, r: number, deg: number) => [cx + r * Math.cos(deg * D2R), cy + r * Math.sin(deg * D2R)] as const;
+const f2 = (n: number) => n.toFixed(2);
+
+/** SVG kimlikleri sayfada tekil olmalı (web'de aynı sayfada birden çok gösterge var) */
+function useGid(): string {
+  return 'g' + useId().replace(/[^a-zA-Z0-9]/g, '');
+}
+
+/**
+ * Gösterilen sayının yumuşak geçişi: hedefe ~600 ms'de akar, yalnızca tam sayı değişince yeniden çizer.
+ * (İki gerçek ölçüm arasındaki geçişi yumuşatır; yeni değer uydurmaz.)
+ */
+export function useTweenedSpeed(target: number | null, reduced?: boolean): number | null {
+  const [shown, setShown] = useState<number | null>(target == null ? null : Math.round(target));
+  const cur = useRef(target ?? 0);
+  useEffect(() => {
+    if (target == null) {
+      setShown(null);
+      return;
+    }
+    const from = cur.current;
+    const to = target;
+    if (reduced || Math.abs(to - from) < 0.5) {
+      cur.current = to;
+      setShown(Math.round(to));
+      return;
+    }
+    const t0 = Date.now();
+    const dur = 600;
+    let raf = 0;
+    const step = () => {
+      const k = Math.min(1, (Date.now() - t0) / dur);
+      const e = 1 - (1 - k) ** 3;
+      cur.current = from + (to - from) * e;
+      const r = Math.round(cur.current);
+      setShown((s) => (s === r ? s : r));
+      if (k < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [target, reduced]);
+  return shown;
+}
+
+/** 0..1 hız oranı; mekanik ibre gibi hafif yaylı (UI thread) */
+function useNeedle(speed: number | null, max: number, reduced?: boolean): SharedValue<number> {
+  const f = useSharedValue(0);
+  useEffect(() => {
+    const v = speed == null ? 0 : Math.min(1.02, Math.max(0, speed / max));
+    f.value = reduced ? withTiming(v, { duration: 150 }) : withSpring(v, { damping: 15, stiffness: 55, mass: 1 });
+  }, [speed, max, reduced, f]);
+  return f;
+}
+
+/** Düz geçişli oran (sütun, şerit dolgusu) */
+function useFraction(speed: number | null, max: number, reduced?: boolean): SharedValue<number> {
+  const f = useSharedValue(0);
+  useEffect(() => {
+    const v = speed == null ? 0 : Math.min(1, Math.max(0, speed / max));
+    f.value = withTiming(v, { duration: reduced ? 150 : 700, easing: Easing.out(Easing.cubic) });
+  }, [speed, max, reduced, f]);
+  return f;
+}
+
+// ---------------------------------------------------------------------------
+// Ortak çizim parçaları
+// ---------------------------------------------------------------------------
+
+/** SVG içinde, (x, y) merkezli rakam */
+function DialNum({ text, x, y, h, color, style, ws = 1, ghost, cond = 1 }: { text: string; x: number; y: number; h: number; color: string; style: GlyphStyle; ws?: number; ghost?: string; cond?: number }) {
+  const g = glyphPath(text, style);
+  const s = h / 16;
+  const w = (g.width + 16 * g.skew) * s * cond;
+  const skew = g.skew ? ` translate(${16 * g.skew} 0) skewX(${f2((-Math.atan(g.skew) * 180) / Math.PI)})` : '';
+  return (
+    <G transform={`translate(${f2(x - w / 2)} ${f2(y - h / 2)}) scale(${(s * cond).toFixed(4)} ${s.toFixed(4)})${skew}`}>
+      {style === 'seg' ? (
+        <>
+          {ghost && g.ghost ? <Path d={g.ghost} fill={ghost} /> : null}
+          <Path d={g.d} fill={color} />
+        </>
+      ) : (
+        <Path d={g.d} stroke={color} strokeWidth={g.weight * 16 * ws} fill="none" strokeLinecap="round" strokeLinejoin="round" />
+      )}
+    </G>
+  );
+}
+
+function Label({ x, y, size, color, children, anchor = 'middle', spacing = 0.6, weight = '700' }: { x: number; y: number; size: number; color: string; children: string; anchor?: 'start' | 'middle' | 'end'; spacing?: number; weight?: '400' | '700' }) {
+  return (
+    <SvgText x={x} y={y} fill={color} fontSize={size} fontWeight={weight} fontFamily={LABEL_FONT} textAnchor={anchor} letterSpacing={spacing}>
+      {children}
+    </SvgText>
+  );
+}
+
+/** Ölçek çizgileri: büyük / orta / küçük */
+function dialTicks(cx: number, cy: number, r: number, a0: number, sweep: number, max: number, lens: [number, number, number]) {
+  const major: string[] = [];
+  const mid: string[] = [];
+  const minor: string[] = [];
+  for (let v = 0; v <= max + 0.01; v += 5) {
+    const a = a0 + (sweep * v) / max;
+    const kind = v % 20 === 0 ? 0 : v % 10 === 0 ? 1 : 2;
+    const [x1, y1] = pt(cx, cy, r, a);
+    const [x2, y2] = pt(cx, cy, r - lens[kind], a);
+    (kind === 0 ? major : kind === 1 ? mid : minor).push(`M${f2(x1)} ${f2(y1)}L${f2(x2)} ${f2(y2)}`);
+  }
+  return { major: major.join(''), mid: mid.join(''), minor: minor.join('') };
+}
+
+function arc(cx: number, cy: number, r: number, a0: number, a1: number) {
+  const [x0, y0] = pt(cx, cy, r, a0);
+  const [x1, y1] = pt(cx, cy, r, a1);
+  const large = Math.abs(a1 - a0) > 180 ? 1 : 0;
+  return `M${f2(x0)} ${f2(y0)}A${r} ${r} 0 ${large} 1 ${f2(x1)} ${f2(y1)}`;
+}
+
+/** Krom çerçeve ve kadran yüzü için gradyanlar */
+function ChromeDefs({ id, pal }: { id: string; pal: Palette }) {
+  return (
+    <Defs>
+      <LinearGradient id={`${id}c`} x1="0" y1="0" x2="0.35" y2="1">
+        <Stop offset="0" stopColor={mix(pal.chrome, '#FFFFFF', 0.55)} />
+        <Stop offset="0.45" stopColor={shade(pal.chrome, 0.55)} />
+        <Stop offset="0.55" stopColor={pal.chrome} />
+        <Stop offset="1" stopColor={shade(pal.chrome, 0.4)} />
+      </LinearGradient>
+      <RadialGradient id={`${id}f`} cx="0.5" cy="0.42" r="0.6">
+        <Stop offset="0" stopColor={mix(pal.face, '#FFFFFF', pal.face > '#888888' ? 0.25 : 0.06)} />
+        <Stop offset="1" stopColor={shade(pal.face, 0.85)} />
+      </RadialGradient>
+      <LinearGradient id={`${id}g`} x1="0" y1="0" x2="0.6" y2="1">
+        <Stop offset="0" stopColor="#FFFFFF" stopOpacity={0.14} />
+        <Stop offset="0.5" stopColor="#FFFFFF" stopOpacity={0.03} />
+        <Stop offset="1" stopColor="#FFFFFF" stopOpacity={0} />
+      </LinearGradient>
+    </Defs>
+  );
+}
+
+/** Kilometre sayacı: siyah kutularda beyaz rakamlar, ondalık hanesi beyaz kutuda siyah */
+function Odo({ x, y, h, text, pal }: { x: number; y: number; h: number; text: string | null | undefined; pal: Palette }) {
+  const [ip, dp] = (text ?? '--').split('.');
+  const intDigits = text == null || ip === '--' ? ['-', '-', '-', '-'] : ip.padStart(4, '0').slice(-4).split('');
+  const dec = text == null ? '-' : (dp ?? '0').slice(0, 1);
+  const cw = h * 0.72;
+  const gap = h * 0.08;
+  const n = intDigits.length + 1;
+  const total = n * cw + (n - 1) * gap;
+  const x0 = x - total / 2;
+  return (
+    <G>
+      <Rect x={x0 - h * 0.18} y={y - h / 2 - h * 0.16} width={total + h * 0.36} height={h * 1.32} rx={h * 0.12} fill="#050505" stroke={alpha(pal.chrome, 0.7)} strokeWidth={h * 0.06} />
+      {[...intDigits, dec].map((d, i) => {
+        const last = i === n - 1;
+        const bx = x0 + i * (cw + gap);
+        return (
+          <G key={i}>
+            <Rect x={bx} y={y - h / 2} width={cw} height={h} fill={last ? '#ECE6D6' : '#121212'} />
+            <DialNum text={d} x={bx + cw / 2} y={y} h={h * 0.68} color={last ? '#141414' : '#EEEAE0'} style="classic" ws={1.1} />
+          </G>
+        );
+      })}
+    </G>
+  );
+}
+
+/** Küçük dijital hız penceresi (analog kadranlarda isteğe bağlı) */
+function DigiWin({ x, y, h, value, pal, over }: { x: number; y: number; h: number; value: number | null; pal: Palette; over?: boolean }) {
+  const text = value == null ? '--' : String(value);
+  const w = h * 2.3;
+  return (
+    <G>
+      <Rect x={x - w / 2} y={y - h / 2} width={w} height={h} rx={h * 0.14} fill="#050505" stroke={alpha(pal.chrome, 0.6)} strokeWidth={h * 0.05} />
+      <DialNum text={text} x={x} y={y} h={h * 0.66} color={over ? pal.danger : pal.text} style="classic" ws={1.15} />
+    </G>
+  );
+}
+
+/** Dönen ibre: pivot (cx, cy) çevresinde; 0° = sağ, saat yönü artar */
+function Needle({
+  f,
+  k,
+  cx,
+  cy,
+  a0,
+  sweep,
+  len,
+  tail,
+  w,
+  color,
+  hub,
+  hubColor,
+}: {
+  f: SharedValue<number>;
+  k: number;
+  cx: number;
+  cy: number;
+  a0: number;
+  sweep: number;
+  len: number;
+  tail: number;
+  w: number;
+  color: string;
+  hub: number;
+  hubColor: string;
+}) {
+  const L = Math.max(len, tail, hub) + 1;
+  const style = useAnimatedStyle(() => ({ transform: [{ rotate: `${a0 + sweep * f.value}deg` }] }));
+  return (
+    <Animated.View pointerEvents="none" style={[{ position: 'absolute', left: (cx - L) * k, top: (cy - L) * k, width: 2 * L * k, height: 2 * L * k }, style]}>
+      <Svg width={2 * L * k} height={2 * L * k} viewBox={`${-L} ${-L} ${2 * L} ${2 * L}`}>
+        {/* gölge */}
+        <Path d={`M${-tail} ${-w * 0.7} L${len} ${-w * 0.18} L${len} ${w * 0.18} L${-tail} ${w * 0.7} Z`} fill="#000" opacity={0.35} transform="translate(0.5 0.8)" />
+        <Path d={`M${-tail} ${-w * 0.7} L${len} ${-w * 0.18} L${len} ${w * 0.18} L${-tail} ${w * 0.7} Z`} fill={color} />
+        <Path d={`M0 ${-w * 0.25} L${len * 0.96} ${-w * 0.05}`} stroke="#FFFFFF" strokeOpacity={0.35} strokeWidth={w * 0.18} />
+        <Circle cx={0} cy={0} r={hub} fill={hubColor} />
+        <Circle cx={0} cy={0} r={hub * 0.55} fill="#000" opacity={0.55} />
+        <Circle cx={-hub * 0.25} cy={-hub * 0.3} r={hub * 0.25} fill="#FFFFFF" opacity={0.25} />
+      </Svg>
+    </Animated.View>
+  );
+}
+
+/** Gösterge kabı + üstüne binen içerik (GPS arama vb.) */
+function Shell({ width, height, children, center, pal }: { width: number; height: number; children: ReactNode; center?: ReactNode; pal: Palette }) {
+  return (
+    <View style={{ width, height }}>
+      {children}
+      {center ? (
+        <View pointerEvents="box-none" style={[StyleSheet.absoluteFill, { alignItems: 'center', justifyContent: 'center', backgroundColor: alpha(pal.bg, 0.82), borderRadius: 8 }]}>
+          {center}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+/** Uyarı lambası (gerçek durumu gösterir: GPS, hız uyarısı) */
+function Lamp({ x, y, r, on, color, label }: { x: number; y: number; r: number; on: boolean; color: string; label: string }) {
+  return (
+    <G>
+      <Circle cx={x} cy={y} r={r} fill={on ? color : '#141414'} stroke="#000" strokeWidth={0.4} />
+      {on ? <Circle cx={x} cy={y} r={r * 1.7} fill={color} opacity={0.18} /> : null}
+      <Label x={x} y={y + r * 0.42} size={r * 0.95} color={on ? '#000' : '#4A4A4A'} spacing={0}>
+        {label}
+      </Label>
+    </G>
+  );
+}
+
+/** Saat verilmezse (önizleme) vitrin saati 10:10 gösterilir */
+const SHOW_TIME = new Date(2026, 0, 1, 10, 9, 30).getTime();
+
+const numEvery = (max: number) => (max > 160 ? 20 : max > 100 ? 20 : 10);
+
+// ---------------------------------------------------------------------------
+// 1) Anadolu 131 — iki yuvarlak kadran (hız + saat)
+// ---------------------------------------------------------------------------
+const TW = { l: { cx: 25, cy: 25 }, r: { cx: 75, cy: 25 }, R: 21 };
+const TW_A0 = 135;
+const TW_SW = 270;
+
+const TwinGauge = memo(function TwinGauge({ speed, max, width, pal, unit, over, reduced, center, assist, now, odo, signal = 'ok' }: GaugeProps) {
+  const h = width * GAUGE_ASPECT.twin;
+  const k = width / 100;
+  const id = useGid();
+  const f = useNeedle(speed, max, reduced);
+  const shown = useTweenedSpeed(assist ? speed : null, reduced);
+  const { cx, cy } = TW.l;
+  const R = TW.R;
+  const ticks = useMemo(() => dialTicks(cx, cy, R - 1.6, TW_A0, TW_SW, max, [3, 2.2, 1.3]), [cx, cy, R, max]);
+  const step = numEvery(max);
+  const nums = useMemo(() => {
+    const out: { v: number; x: number; y: number }[] = [];
+    for (let v = 0; v <= max; v += step) {
+      const [x, y] = pt(cx, cy, R - 7.4, TW_A0 + (TW_SW * v) / max);
+      out.push({ v, x, y });
+    }
+    return out;
+  }, [cx, cy, R, max, step]);
+  // Analog saat
+  const d = new Date(now ?? SHOW_TIME);
+  const mins = d.getMinutes() + d.getSeconds() / 60;
+  const hrs = (d.getHours() % 12) + mins / 60;
+  const C = TW.r;
+  const clockTicks = useMemo(() => {
+    const a: string[] = [];
+    const b: string[] = [];
+    for (let i = 0; i < 60; i++) {
+      const ang = i * 6 - 90;
+      const big = i % 5 === 0;
+      const [x1, y1] = pt(C.cx, C.cy, R - 1.6, ang);
+      const [x2, y2] = pt(C.cx, C.cy, R - (big ? 4.4 : 2.6), ang);
+      (big ? a : b).push(`M${f2(x1)} ${f2(y1)}L${f2(x2)} ${f2(y2)}`);
+    }
+    return { big: a.join(''), small: b.join('') };
+  }, [C.cx, C.cy, R]);
+  const hand = (deg: number, len: number) => {
+    const [x, y] = pt(C.cx, C.cy, len, deg - 90);
+    const [tx, ty] = pt(C.cx, C.cy, len * 0.18, deg + 90);
+    return `M${f2(tx)} ${f2(ty)}L${f2(x)} ${f2(y)}`;
+  };
+  const housing = shade(pal.bg, 0.75);
+  return (
+    <Shell width={width} height={h} center={center} pal={pal}>
+      <Svg width={width} height={h} viewBox="0 0 100 50">
+        <ChromeDefs id={id} pal={pal} />
+        {/* dikdörtgen gövde ve üst siperlik */}
+        <Rect x={0.6} y={0.6} width={98.8} height={48.8} rx={7} fill={housing} stroke={alpha(pal.chrome, 0.35)} strokeWidth={0.5} />
+        <Path d="M4 3.2 Q50 -0.6 96 3.2" stroke={alpha('#FFFFFF', 0.12)} strokeWidth={0.6} fill="none" />
+        {[TW.l, TW.r].map((c, i) => (
+          <G key={i}>
+            <Circle cx={c.cx} cy={c.cy} r={R + 1.6} fill={`url(#${id}c)`} />
+            <Circle cx={c.cx} cy={c.cy} r={R} fill={`url(#${id}f)`} />
+          </G>
+        ))}
+        {/* hız kadranı */}
+        <Path d={ticks.minor} stroke={alpha(pal.text, 0.7)} strokeWidth={0.35} />
+        <Path d={ticks.mid} stroke={pal.text} strokeWidth={0.55} />
+        <Path d={ticks.major} stroke={pal.text} strokeWidth={0.9} />
+        {/* kırmızı bölge: skalanın son %15'i */}
+        <Path d={arc(cx, cy, R - 1.2, TW_A0 + TW_SW * 0.85, TW_A0 + TW_SW)} stroke={alpha(pal.danger, 0.85)} strokeWidth={0.9} fill="none" />
+        {nums.map((n) => (
+          <DialNum key={n.v} text={String(n.v)} x={n.x} y={n.y} h={2.9} color={pal.text} style="classic" cond={0.72} ws={1.25} />
+        ))}
+        <Label x={cx} y={cy + 6.4} size={2.2} color={alpha(pal.text, 0.8)}>
+          {unit.toLowerCase()}
+        </Label>
+        {assist ? <DigiWin x={cx} y={cy - 6.5} h={4} value={shown} pal={pal} over={over} /> : null}
+        <Odo x={cx} y={cy + 14.6} h={2.9} text={odo} pal={pal} />
+        {/* saat */}
+        <Path d={clockTicks.small} stroke={alpha(pal.text, 0.6)} strokeWidth={0.3} />
+        <Path d={clockTicks.big} stroke={pal.text} strokeWidth={0.9} />
+        {[12, 3, 6, 9].map((n, i) => {
+          const [x, y] = pt(C.cx, C.cy, R - 8.4, i * 90 - 90);
+          return <DialNum key={n} text={String(n)} x={x} y={y} h={3.6} color={pal.text} style="classic" />;
+        })}
+        <Path d={hand(hrs * 30, 9.5)} stroke={pal.text} strokeWidth={1.5} strokeLinecap="round" />
+        <Path d={hand(mins * 6, 15)} stroke={pal.text} strokeWidth={1} strokeLinecap="round" />
+        <Path d={hand(d.getSeconds() * 6, 16.5)} stroke={pal.needle} strokeWidth={0.4} />
+        <Circle cx={C.cx} cy={C.cy} r={1.4} fill={pal.needle} />
+        {/* ortadaki uyarı lambaları */}
+        <Lamp x={50} y={15} r={2.1} on={signal === 'ok'} color="#43D35C" label="G" />
+        <Lamp x={50} y={25} r={2.1} on={signal === 'weak'} color="#FFB23E" label="!" />
+        <Lamp x={50} y={35} r={2.1} on={!!over} color="#FF3B2F" label="H" />
+        {/* cam parlaması */}
+        <Path d="M2 2 H98 V18 Q50 24 2 14 Z" fill={`url(#${id}g)`} />
+      </Svg>
+      <Needle f={f} k={k} cx={cx} cy={cy} a0={TW_A0} sweep={TW_SW} len={R - 2.2} tail={4} w={1.5} color={over ? pal.danger : pal.needle} hub={2.4} hubColor="#1A1A1A" />
+    </Shell>
+  );
+});
+
+// ---------------------------------------------------------------------------
+// 2) Şerit 124 — yatay skala, sağa sola kayan ibre
+// ---------------------------------------------------------------------------
+const RB = { x0: 9, x1: 91, top: 5, bot: 31 };
+
+const RibbonGauge = memo(function RibbonGauge({ speed, max, width, pal, unit, over, reduced, center, assist, odo }: GaugeProps) {
+  const h = width * GAUGE_ASPECT.ribbon;
+  const k = width / 100;
+  const id = useGid();
+  const f = useNeedle(speed, max, reduced);
+  const shown = useTweenedSpeed(assist ? speed : null, reduced);
+  const span = RB.x1 - RB.x0;
+  const scale = useMemo(() => {
+    const maj: string[] = [];
+    const mid: string[] = [];
+    const min: string[] = [];
+    for (let v = 0; v <= max + 0.01; v += 5) {
+      const x = RB.x0 + (span * v) / max;
+      if (v % 20 === 0) maj.push(`M${f2(x)} 16.5L${f2(x)} 23.5`);
+      else if (v % 10 === 0) mid.push(`M${f2(x)} 18.5L${f2(x)} 23.5`);
+      else min.push(`M${f2(x)} 20.8L${f2(x)} 23.5`);
+    }
+    return { maj: maj.join(''), mid: mid.join(''), min: min.join('') };
+  }, [max, span]);
+  const step = numEvery(max);
+  const needleStyle = useAnimatedStyle(() => ({ transform: [{ translateX: span * k * Math.min(1.01, f.value) }] }));
+  const col = over ? pal.danger : pal.needle;
+  return (
+    <Shell width={width} height={h} center={center} pal={pal}>
+      <Svg width={width} height={h} viewBox="0 0 100 48">
+        <ChromeDefs id={id} pal={pal} />
+        {/* krom çerçeve ve siyah yüz */}
+        <Rect x={1} y={RB.top - 3} width={98} height={RB.bot - RB.top + 6} rx={5} fill={`url(#${id}c)`} />
+        <Rect x={3} y={RB.top - 1} width={94} height={RB.bot - RB.top + 2} rx={3.5} fill={`url(#${id}f)`} />
+        {Array.from({ length: Math.floor(max / step) + 1 }, (_, i) => i * step).map((v) => (
+          <DialNum key={v} text={String(v)} x={RB.x0 + (span * v) / max} y={11.2} h={4.2} color={pal.text} style="classic" cond={0.7} ws={1.25} />
+        ))}
+        <Path d={scale.min} stroke={alpha(pal.text, 0.7)} strokeWidth={0.35} />
+        <Path d={scale.mid} stroke={pal.text} strokeWidth={0.55} />
+        <Path d={scale.maj} stroke={pal.text} strokeWidth={0.85} />
+        {/* renkli bant: şehir içi / yol / sınır */}
+        <Rect x={RB.x0} y={25} width={span * 0.3} height={1.3} fill={alpha('#58C46A', 0.75)} />
+        <Rect x={RB.x0 + span * 0.3} y={25} width={span * 0.5} height={1.3} fill={alpha('#E9C24A', 0.7)} />
+        <Rect x={RB.x0 + span * 0.8} y={25} width={span * 0.2} height={1.3} fill={alpha(pal.danger, 0.8)} />
+        <Label x={RB.x1} y={29.6} size={2.4} color={alpha(pal.text, 0.75)} anchor="end">
+          {unit.toLowerCase()}
+        </Label>
+        <Path d={`M3 ${RB.top - 1} H97 V${RB.top + 8} Q50 ${RB.top + 13} 3 ${RB.top + 6} Z`} fill={`url(#${id}g)`} />
+        {/* alt kısım: sayaç (+ dijital pencere) */}
+        <Odo x={assist ? 34 : 50} y={41} h={4.4} text={odo} pal={pal} />
+        {assist ? <DigiWin x={70} y={41} h={6} value={shown} pal={pal} over={over} /> : null}
+      </Svg>
+      {/* kayan ibre */}
+      <Animated.View pointerEvents="none" style={[{ position: 'absolute', left: (RB.x0 - 2) * k, top: (RB.top + 7) * k, width: 4 * k, height: 20 * k, alignItems: 'center' }, needleStyle]}>
+        <Svg width={4 * k} height={20 * k} viewBox="0 0 4 20">
+          <Path d="M0.6 0 L3.4 0 L2 2.6 Z" fill={col} />
+          <Rect x={1.25} y={2} width={1.5} height={17} fill="#000" opacity={0.35} transform="translate(0.4 0.4)" />
+          <Rect x={1.25} y={2} width={1.5} height={17} fill={col} />
+          <Rect x={1.25} y={2} width={0.45} height={17} fill="#FFF" opacity={0.3} />
+        </Svg>
+      </Animated.View>
+    </Shell>
+  );
+});
+
+// ---------------------------------------------------------------------------
+// 3) Krom 57 — yarım ay yelpaze, krem kadran
+// ---------------------------------------------------------------------------
+const FN = { cx: 50, cy: 56, R: 46 };
+const FN_A0 = 190;
+const FN_SW = 160;
+
+const FanGauge = memo(function FanGauge({ speed, max, width, pal, glyph, unit, over, reduced, center, assist, odo }: GaugeProps) {
+  const h = width * GAUGE_ASPECT.fan;
+  const k = width / 100;
+  const id = useGid();
+  const f = useNeedle(speed, max, reduced);
+  const shown = useTweenedSpeed(assist ? speed : null, reduced);
+  const { cx, cy, R } = FN;
+  const ticks = useMemo(() => dialTicks(cx, cy, R - 4, FN_A0, FN_SW, max, [4, 2.8, 1.6]), [cx, cy, R, max]);
+  const step = numEvery(max);
+  const rays = useMemo(() => {
+    const out: string[] = [];
+    for (let a = 182; a < 360; a += 4) {
+      const [x1, y1] = pt(cx, cy, 12, a);
+      const [x2, y2] = pt(cx, cy, R - 12, a);
+      out.push(`M${f2(x1)} ${f2(y1)}L${f2(x2)} ${f2(y2)}`);
+    }
+    return out.join('');
+  }, [cx, cy, R]);
+  return (
+    <Shell width={width} height={h} center={center} pal={pal}>
+      <Svg width={width} height={h} viewBox="0 0 100 64">
+        <ChromeDefs id={id} pal={pal} />
+        {/* krom kubbe çerçeve */}
+        <Path d={`${arc(cx, cy, R + 2.6, 180, 360)} L${cx + R + 2.6} ${cy + 4} L${cx - R - 2.6} ${cy + 4} Z`} fill={`url(#${id}c)`} />
+        <Path d={`${arc(cx, cy, R, 180, 360)} Z`} fill={`url(#${id}f)`} />
+        {/* güneş ışınları ve altın halkalar */}
+        <Path d={rays} stroke={alpha(pal.secondary, 0.22)} strokeWidth={0.5} />
+        <Path d={arc(cx, cy, R - 1.2, 180, 360)} stroke={alpha(pal.secondary, 0.9)} strokeWidth={0.6} fill="none" />
+        <Path d={arc(cx, cy, R - 10.5, 180, 360)} stroke={alpha(pal.secondary, 0.7)} strokeWidth={0.4} fill="none" />
+        <Path d={arc(cx, cy, 22, 180, 360)} stroke={alpha(pal.secondary, 0.85)} strokeWidth={1.6} fill="none" />
+        <Path d={arc(cx, cy, 22, FN_A0 + FN_SW * 0.85, FN_A0 + FN_SW)} stroke={alpha(pal.danger, 0.9)} strokeWidth={1.6} fill="none" />
+        <Path d={ticks.minor} stroke={alpha(pal.text, 0.6)} strokeWidth={0.35} />
+        <Path d={ticks.mid} stroke={pal.text} strokeWidth={0.6} />
+        <Path d={ticks.major} stroke={pal.text} strokeWidth={1.1} />
+        {Array.from({ length: Math.floor(max / step) + 1 }, (_, i) => i * step).map((v) => {
+          const [x, y] = pt(cx, cy, R - 13.5, FN_A0 + (FN_SW * v) / max);
+          return <DialNum key={v} text={String(v)} x={x} y={y} h={4.2} color={pal.text} style={glyph} ws={1.2} cond={0.78} />;
+        })}
+        {assist ? <DigiWin x={cx} y={cy - 17} h={5} value={shown} pal={pal} over={over} /> : null}
+        <Odo x={cx} y={cy - 9} h={3.6} text={odo} pal={pal} />
+        {/* krom taban ve birim plakası */}
+        <Rect x={cx - R - 2.6} y={cy + 1} width={2 * R + 5.2} height={6.4} rx={1.5} fill={`url(#${id}c)`} />
+        <Label x={cx + 30} y={cy + 5.6} size={2.8} color="#1B1B1B" spacing={1.2}>
+          {unit}
+        </Label>
+        <Label x={cx - 30} y={cy + 5.6} size={2.8} color="#1B1B1B" spacing={1.2}>
+          SPEED
+        </Label>
+        <Path d={`${arc(cx, cy, R, 180, 300)} Q40 ${cy - 30} ${cx - R} ${cy - 2} Z`} fill={`url(#${id}g)`} />
+      </Svg>
+      <Needle f={f} k={k} cx={cx} cy={cy} a0={FN_A0} sweep={FN_SW} len={R - 3} tail={3} w={1.6} color={over ? pal.danger : pal.needle} hub={5.2} hubColor={mix(pal.chrome, '#FFFFFF', 0.2)} />
+    </Shell>
+  );
+});
+
+// ---------------------------------------------------------------------------
+// 4) Ceviz Roadster — büyük siyah yuvarlak kadran, 270°
+// ---------------------------------------------------------------------------
+const SP = { cx: 50, cy: 44, R: 41, a0: 135, sw: 270 };
+
+const SportGauge = memo(function SportGauge({ speed, max, width, pal, unit, over, reduced, center, assist, now, odo }: GaugeProps) {
+  const h = width * GAUGE_ASPECT.sport;
+  const k = width / 100;
+  const id = useGid();
+  const f = useNeedle(speed, max, reduced);
+  const shown = useTweenedSpeed(assist ? speed : null, reduced);
+  const { cx, cy, R, a0, sw } = SP;
+  const ticks = useMemo(() => dialTicks(cx, cy, R - 2, a0, sw, max, [5, 3.4, 2]), [cx, cy, R, a0, sw, max]);
+  const step = numEvery(max);
+  // küçük saat (alt boşlukta)
+  const d = new Date(now ?? SHOW_TIME);
+  const mins = d.getMinutes() + d.getSeconds() / 60;
+  const hrs = (d.getHours() % 12) + mins / 60;
+  const ccx = cx;
+  const ccy = cy + 29.5;
+  const cr = 7.2;
+  const hand = (deg: number, len: number) => {
+    const [x, y] = pt(ccx, ccy, len, deg - 90);
+    return `M${ccx} ${ccy}L${f2(x)} ${f2(y)}`;
+  };
+  return (
+    <Shell width={width} height={h} center={center} pal={pal}>
+      <Svg width={width} height={h} viewBox="0 0 100 88">
+        <ChromeDefs id={id} pal={pal} />
+        <Circle cx={cx} cy={cy} r={R + 3.4} fill={`url(#${id}c)`} />
+        <Circle cx={cx} cy={cy} r={R + 1} fill={shade(pal.chrome, 0.35)} />
+        <Circle cx={cx} cy={cy} r={R} fill={`url(#${id}f)`} />
+        <Path d={ticks.minor} stroke={alpha(pal.text, 0.75)} strokeWidth={0.4} />
+        <Path d={ticks.mid} stroke={pal.text} strokeWidth={0.7} />
+        <Path d={ticks.major} stroke={pal.text} strokeWidth={1.3} />
+        {Array.from({ length: Math.floor(max / step) + 1 }, (_, i) => i * step).map((v) => {
+          const [x, y] = pt(cx, cy, R - 11.5, a0 + (sw * v) / max);
+          return <DialNum key={v} text={String(v)} x={x} y={y} h={5} color={pal.text} style="classic" cond={0.72} ws={1.2} />;
+        })}
+        <Label x={cx} y={cy - 12} size={3.2} color={alpha(pal.text, 0.85)} spacing={1.4}>
+          {unit}
+        </Label>
+        {assist ? <DigiWin x={cx} y={cy + 11} h={5.4} value={shown} pal={pal} over={over} /> : null}
+        <Odo x={cx} y={cy + (assist ? 19 : 14)} h={3.8} text={odo} pal={pal} />
+        {/* alt boşlukta küçük saat */}
+        <Circle cx={ccx} cy={ccy} r={cr + 1.2} fill={`url(#${id}c)`} />
+        <Circle cx={ccx} cy={ccy} r={cr} fill={pal.face} />
+        {Array.from({ length: 12 }, (_, i) => {
+          const [x1, y1] = pt(ccx, ccy, cr - 0.6, i * 30 - 90);
+          const [x2, y2] = pt(ccx, ccy, cr - (i % 3 === 0 ? 2 : 1.2), i * 30 - 90);
+          return <Path key={i} d={`M${f2(x1)} ${f2(y1)}L${f2(x2)} ${f2(y2)}`} stroke={pal.text} strokeWidth={i % 3 === 0 ? 0.6 : 0.35} />;
+        })}
+        <Path d={hand(hrs * 30, 3.6)} stroke={pal.text} strokeWidth={0.8} strokeLinecap="round" />
+        <Path d={hand(mins * 6, 5.6)} stroke={pal.text} strokeWidth={0.5} strokeLinecap="round" />
+        <Circle cx={ccx} cy={ccy} r={0.7} fill={pal.text} />
+        <Path d={`M${cx - R + 4} ${cy - 8} A${R} ${R} 0 0 1 ${cx + R - 10} ${cy - 30} Q${cx} ${cy - 22} ${cx - R + 4} ${cy - 8} Z`} fill={`url(#${id}g)`} />
+      </Svg>
+      <Needle f={f} k={k} cx={cx} cy={cy} a0={a0} sweep={sw} len={R - 3} tail={9} w={1.4} color={over ? pal.danger : pal.needle} hub={3.6} hubColor="#151515" />
+    </Shell>
+  );
+});
+
+// ---------------------------------------------------------------------------
+// 5) Tambur — büyüteç penceresinde dönen rakam tamburu
+// ---------------------------------------------------------------------------
+const DR = { x0: 6, x1: 94, top: 7, bot: 35 };
+/** Tamburda 10 birimlik aralık (gösterge birimi) */
+const DRUM_GAP = 30;
+
+const DrumGauge = memo(function DrumGauge({ speed, max, width, pal, unit, over, reduced, center, odo }: GaugeProps) {
+  const h = width * GAUGE_ASPECT.drum;
+  const k = width / 100;
+  const id = useGid();
+  const f = useFraction(speed, max, reduced);
+  const ppu = DRUM_GAP / 10; // birim başına genişlik
+  const winW = DR.x1 - DR.x0;
+  const tapeW = (max + 20) * ppu + winW;
+  const tape = useMemo(() => {
+    const nums: ReactNode[] = [];
+    const t: string[] = [];
+    const tm: string[] = [];
+    for (let v = 0; v <= max + 0.01; v += 2) {
+      const x = winW / 2 + v * ppu;
+      if (v % 10 === 0) {
+        t.push(`M${f2(x)} 21.5L${f2(x)} 26.5`);
+        nums.push(<DialNum key={v} text={String(v)} x={x} y={12.5} h={11} color={pal.text} style="classic" ws={1.15} cond={0.8} />);
+      } else tm.push(`M${f2(x)} 23.5L${f2(x)} 26.5`);
+    }
+    return { nums, t: t.join(''), tm: tm.join('') };
+  }, [max, ppu, winW, pal.text]);
+  const tapeStyle = useAnimatedStyle(() => ({ transform: [{ translateX: -f.value * max * ppu * k }] }));
+  const col = over ? pal.danger : pal.needle;
+  const winH = DR.bot - DR.top;
+  return (
+    <Shell width={width} height={h} center={center} pal={pal}>
+      <Svg width={width} height={h} viewBox="0 0 100 52" style={StyleSheet.absoluteFill}>
+        <ChromeDefs id={id} pal={pal} />
+        <Rect x={0.6} y={0.6} width={98.8} height={50.8} rx={6} fill={shade(pal.bg, 0.8)} stroke={alpha(pal.chrome, 0.35)} strokeWidth={0.5} />
+        <Rect x={DR.x0 - 2} y={DR.top - 2} width={winW + 4} height={winH + 4} rx={4} fill={`url(#${id}c)`} />
+        <Rect x={DR.x0} y={DR.top} width={winW} height={winH} rx={2.5} fill={pal.face} />
+        <Label x={DR.x0 + 2} y={45} size={2.8} color={alpha(pal.text, 0.8)} anchor="start" spacing={1}>
+          {unit}
+        </Label>
+        <Odo x={60} y={44} h={4.2} text={odo} pal={pal} />
+      </Svg>
+      {/* tambur penceresi */}
+      <View style={{ position: 'absolute', left: DR.x0 * k, top: DR.top * k, width: winW * k, height: winH * k, overflow: 'hidden', borderRadius: 2.5 * k }}>
+        <Animated.View style={[{ position: 'absolute', left: 0, top: 0, width: tapeW * k, height: winH * k }, tapeStyle]}>
+          <Svg width={tapeW * k} height={winH * k} viewBox={`0 0 ${tapeW} ${winH}`}>
+            {tape.nums}
+            <Path d={tape.tm} stroke={alpha(pal.text, 0.7)} strokeWidth={0.45} />
+            <Path d={tape.t} stroke={pal.text} strokeWidth={0.8} />
+          </Svg>
+        </Animated.View>
+        {/* silindir gölgesi + büyüteç parlaması */}
+        <Svg width={winW * k} height={winH * k} viewBox={`0 0 ${winW} ${winH}`} style={StyleSheet.absoluteFill}>
+          <Defs>
+            <LinearGradient id={`${id}d`} x1="0" y1="0" x2="1" y2="0">
+              <Stop offset="0" stopColor={pal.face} stopOpacity={1} />
+              <Stop offset="0.22" stopColor={pal.face} stopOpacity={0.15} />
+              <Stop offset="0.5" stopColor={pal.face} stopOpacity={0} />
+              <Stop offset="0.78" stopColor={pal.face} stopOpacity={0.15} />
+              <Stop offset="1" stopColor={pal.face} stopOpacity={1} />
+            </LinearGradient>
+            <LinearGradient id={`${id}v`} x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0" stopColor="#000" stopOpacity={0.55} />
+              <Stop offset="0.25" stopColor="#000" stopOpacity={0} />
+              <Stop offset="0.75" stopColor="#000" stopOpacity={0} />
+              <Stop offset="1" stopColor="#000" stopOpacity={0.6} />
+            </LinearGradient>
+          </Defs>
+          <Rect x={0} y={0} width={winW} height={winH} fill={`url(#${id}d)`} />
+          <Rect x={0} y={0} width={winW} height={winH} fill={`url(#${id}v)`} />
+          {/* sabit kırmızı okuma çizgisi */}
+          <Path d={`M${winW / 2 - 1.6} 0 L${winW / 2 + 1.6} 0 L${winW / 2 + 0.35} 3 L${winW / 2 + 0.35} ${winH} L${winW / 2 - 0.35} ${winH} L${winW / 2 - 0.35} 3 Z`} fill={col} />
+          <Path d={`M${winW * 0.2} 2 Q${winW / 2} -1 ${winW * 0.8} 2 L${winW * 0.75} 6 Q${winW / 2} 3.5 ${winW * 0.25} 6 Z`} fill="#FFFFFF" opacity={0.08} />
+        </Svg>
+      </View>
+    </Shell>
+  );
+});
+
+// ---------------------------------------------------------------------------
+// 6) Termometre — dikey cam tüpte yükselen kırmızı sütun (km/h solda, mph sağda)
+// ---------------------------------------------------------------------------
+const CL = { top: 14, bot: 94, x: 46, w: 8 };
+
+const ColumnGauge = memo(function ColumnGauge({ speed, max, width, pal, unit, over, reduced, center, assist, odo }: GaugeProps) {
+  const h = width * GAUGE_ASPECT.column;
+  const k = width / 100;
+  const id = useGid();
+  const f = useFraction(speed, max, reduced);
+  const shown = useTweenedSpeed(assist ? speed : null, reduced);
+  const span = CL.bot - CL.top;
+  const mph = unit === 'MPH';
+  // İkinci skala: diğer birim (gerçek dönüşüm)
+  const otherMax = mph ? max * 1.609344 : max / 1.609344;
+  const step = numEvery(max);
+  const scale = useMemo(() => {
+    const maj: string[] = [];
+    const min: string[] = [];
+    for (let v = 0; v <= max + 0.01; v += 5) {
+      const y = CL.bot - (span * v) / max;
+      if (v % 10 === 0) maj.push(`M${CL.x - 2} ${f2(y)}L${CL.x - (v % 20 === 0 ? 7 : 5)} ${f2(y)}`);
+      else min.push(`M${CL.x - 2} ${f2(y)}L${CL.x - 4} ${f2(y)}`);
+    }
+    const o: string[] = [];
+    const oStep = mph ? 20 : 10;
+    for (let v = 0; v <= otherMax + 0.01; v += oStep / 2) {
+      const y = CL.bot - (span * v) / otherMax;
+      o.push(`M${CL.x + CL.w + 2} ${f2(y)}L${CL.x + CL.w + (v % oStep === 0 ? 6 : 4)} ${f2(y)}`);
+    }
+    return { maj: maj.join(''), min: min.join(''), o: o.join(''), oStep };
+  }, [max, span, otherMax, mph]);
+  const colStyle = useAnimatedStyle(() => ({ height: span * k * f.value }));
+  const col = over ? pal.danger : pal.needle;
+  return (
+    <Shell width={width} height={h} center={center} pal={pal}>
+      <Svg width={width} height={h} viewBox="0 0 100 120" style={StyleSheet.absoluteFill}>
+        <ChromeDefs id={id} pal={pal} />
+        <Rect x={16} y={1.5} width={68} height={117} rx={8} fill={`url(#${id}c)`} />
+        <Rect x={18.5} y={4} width={63} height={112} rx={6} fill={`url(#${id}f)`} />
+        {/* cam tüp */}
+        <Rect x={CL.x} y={CL.top - 3} width={CL.w} height={span + 3} rx={CL.w / 2} fill="#000" stroke={alpha(pal.chrome, 0.6)} strokeWidth={0.5} />
+        <Circle cx={CL.x + CL.w / 2} cy={CL.bot + 4.5} r={6} fill={col} stroke={alpha(pal.chrome, 0.7)} strokeWidth={0.6} />
+        <Circle cx={CL.x + CL.w / 2 - 2} cy={CL.bot + 2.6} r={1.6} fill="#FFF" opacity={0.35} />
+        <Path d={scale.min} stroke={alpha(pal.text, 0.7)} strokeWidth={0.4} />
+        <Path d={scale.maj} stroke={pal.text} strokeWidth={0.8} />
+        <Path d={scale.o} stroke={alpha(pal.text, 0.6)} strokeWidth={0.45} />
+        {Array.from({ length: Math.floor(max / step) + 1 }, (_, i) => i * step).map((v) => (
+          <DialNum key={v} text={String(v)} x={CL.x - 13} y={CL.bot - (span * v) / max} h={4.4} color={pal.text} style="classic" />
+        ))}
+        {Array.from({ length: Math.floor(otherMax / scale.oStep) + 1 }, (_, i) => i * scale.oStep).map((v) => (
+          <DialNum key={`o${v}`} text={String(v)} x={CL.x + CL.w + 11} y={CL.bot - (span * v) / otherMax} h={3.2} color={alpha(pal.text, 0.6)} style="classic" />
+        ))}
+        <Label x={CL.x - 13} y={7.6} size={2.6} color={pal.text}>
+          {unit.toLowerCase()}
+        </Label>
+        <Label x={CL.x + CL.w + 11} y={7.6} size={2.4} color={alpha(pal.text, 0.6)}>
+          {mph ? 'km/h' : 'mph'}
+        </Label>
+        {assist ? <DigiWin x={30} y={110.5} h={5} value={shown} pal={pal} over={over} /> : null}
+        <Odo x={assist ? 63 : 50} y={110.5} h={3.6} text={odo} pal={pal} />
+      </Svg>
+      {/* yükselen sütun */}
+      <View pointerEvents="none" style={{ position: 'absolute', left: (CL.x + 1.6) * k, top: CL.top * k, width: (CL.w - 3.2) * k, height: (span + 1) * k, justifyContent: 'flex-end' }}>
+        <Animated.View style={[{ width: '100%', backgroundColor: col, borderTopLeftRadius: 2 * k, borderTopRightRadius: 2 * k }, colStyle]} />
+      </View>
+      <View pointerEvents="none" style={{ position: 'absolute', left: (CL.x + 1.6) * k, top: CL.top * k, width: 1 * k, height: span * k, backgroundColor: '#FFFFFF', opacity: 0.18 }} />
+    </Shell>
+  );
+});
+
+// ---------------------------------------------------------------------------
+// 7) Dijital 85 — vakum floresan (VFD): segment rakam + yay çubuk grafik
+// ---------------------------------------------------------------------------
+const VF = { cx: 50, cy: 47, r1: 34, r2: 42, a0: 165, sw: 210, n: 42 };
+const VFD_SEGS = Array.from({ length: VF.n }, (_, i) => {
+  const step = VF.sw / VF.n;
+  const a0 = VF.a0 + i * step + 0.6;
+  const a1 = a0 + step - 1.6;
+  const r2 = VF.r1 + 3 + (VF.r2 - VF.r1 - 3) * (i / VF.n);
+  const p = [pt(VF.cx, VF.cy, VF.r1, a0), pt(VF.cx, VF.cy, r2, a0), pt(VF.cx, VF.cy, r2, a1), pt(VF.cx, VF.cy, VF.r1, a1)];
+  return `M${p.map((q) => `${f2(q[0])} ${f2(q[1])}`).join('L')}Z`;
+});
+
+const VfdGauge = memo(function VfdGauge({ speed, max, width, pal, unit, over, reduced, center, odo }: GaugeProps) {
+  const h = width * GAUGE_ASPECT.vfd;
+  const id = useGid();
+  const shown = useTweenedSpeed(speed, reduced);
+  const lit = shown == null ? 0 : Math.round(Math.min(1, shown / max) * VF.n);
+  const ghost = alpha(pal.text, 0.07);
+  const txt = shown == null ? '--' : String(shown);
+  const digits = txt.padStart(3, ' ');
+  const step = max > 160 ? 40 : 20;
+  return (
+    <Shell width={width} height={h} center={center} pal={pal}>
+      <Svg width={width} height={h} viewBox="0 0 100 66">
+        <Defs>
+          <LinearGradient id={`${id}s`} x1="0" y1="0" x2="1" y2="1">
+            <Stop offset="0" stopColor="#FFFFFF" stopOpacity={0.07} />
+            <Stop offset="0.4" stopColor="#FFFFFF" stopOpacity={0} />
+          </LinearGradient>
+        </Defs>
+        <Rect x={0.6} y={0.6} width={98.8} height={64.8} rx={5} fill={pal.face} stroke={alpha(pal.chrome, 0.9)} strokeWidth={0.8} />
+        {VFD_SEGS.map((d, i) => {
+          const on = i < lit;
+          const hot = i / VF.n >= 0.8;
+          return <Path key={i} d={d} fill={on ? (over ? pal.danger : hot ? pal.secondary : pal.text) : ghost} />;
+        })}
+        {Array.from({ length: Math.floor(max / step) }, (_, i) => (i + 1) * step).map((v) => {
+          const [x, y] = pt(VF.cx, VF.cy, VF.r2 + 3.6, VF.a0 + (VF.sw * v) / max);
+          return <DialNum key={v} text={String(v)} x={x} y={y} h={2.8} color={alpha(pal.text, 0.7)} style="seg" />;
+        })}
+        <G>
+          <DialNum text={digits} x={VF.cx} y={VF.cy - 3} h={20} color={over ? pal.danger : pal.text} style="seg" ghost={ghost} />
+        </G>
+        <Label x={VF.cx} y={VF.cy + 10.6} size={3.2} color={pal.text} spacing={2}>
+          {unit}
+        </Label>
+        {/* alt şerit: yolculuk */}
+        <Label x={10} y={62.4} size={2.8} color={alpha(pal.text, 0.6)} anchor="start" spacing={1.2}>
+          TRIP
+        </Label>
+        <DialNum text={odo ?? '--'} x={30} y={61.3} h={4.2} color={pal.text} style="seg" />
+        <Label x={90} y={62.4} size={2.8} color={over ? pal.danger : alpha(pal.secondary, 0.9)} anchor="end" spacing={1.2}>
+          {over ? 'HIZ SINIRI' : 'ELECTRONIC'}
+        </Label>
+        <Rect x={0.6} y={0.6} width={98.8} height={64.8} rx={5} fill={`url(#${id}s)`} />
+      </Svg>
+    </Shell>
+  );
+});
+
+// ---------------------------------------------------------------------------
+// 8) LED 79 — kırmızı LED rakamlar + yatay LED merdiven
+// ---------------------------------------------------------------------------
+const LED_N = 30;
+
+const LedGauge = memo(function LedGauge({ speed, max, width, pal, unit, over, reduced, center, odo }: GaugeProps) {
+  const h = width * GAUGE_ASPECT.led;
+  const id = useGid();
+  const shown = useTweenedSpeed(speed, reduced);
+  const lit = shown == null ? 0 : Math.round(Math.min(1, shown / max) * LED_N);
+  const ghost = alpha(pal.text, 0.09);
+  const txt = shown == null ? '--' : String(shown);
+  const bars = useMemo(
+    () =>
+      Array.from({ length: LED_N }, (_, i) => {
+        const x = 8 + i * (84 / LED_N);
+        const bh = 2.5 + (i / LED_N) * 8.5;
+        return { x, y: 47 - bh, w: 84 / LED_N - 0.9, h: bh };
+      }),
+    [],
+  );
+  return (
+    <Shell width={width} height={h} center={center} pal={pal}>
+      <Svg width={width} height={h} viewBox="0 0 100 52">
+        <Defs>
+          <LinearGradient id={`${id}s`} x1="0" y1="0" x2="0" y2="1">
+            <Stop offset="0" stopColor="#FFFFFF" stopOpacity={0.08} />
+            <Stop offset="0.35" stopColor="#FFFFFF" stopOpacity={0} />
+          </LinearGradient>
+        </Defs>
+        <Rect x={0.6} y={0.6} width={98.8} height={50.8} rx={3} fill={pal.face} stroke={alpha(pal.chrome, 0.9)} strokeWidth={0.8} />
+        <DialNum text={txt.padStart(3, ' ')} x={46} y={18} h={24} color={over ? pal.secondary : pal.text} style="seg" ghost={ghost} />
+        <Label x={86} y={14} size={3.2} color={pal.text} spacing={1}>
+          {unit}
+        </Label>
+        <DialNum text={odo ?? '--'} x={86} y={24} h={3.8} color={alpha(pal.text, 0.8)} style="seg" />
+        <Label x={86} y={30.5} size={2.2} color={alpha(pal.text, 0.6)} spacing={0.8}>
+          TRIP
+        </Label>
+        {bars.map((b, i) => (
+          <Rect key={i} x={b.x} y={b.y} width={b.w} height={b.h} fill={i < lit ? (over ? pal.secondary : pal.text) : ghost} />
+        ))}
+        <Rect x={0.6} y={0.6} width={98.8} height={50.8} rx={3} fill={`url(#${id}s)`} />
+      </Svg>
+    </Shell>
+  );
+});
+
+export function Gauge({ kind, ...p }: GaugeProps & { kind: GaugeKind }) {
+  switch (kind) {
+    case 'ribbon':
+      return <RibbonGauge {...p} />;
+    case 'fan':
+      return <FanGauge {...p} />;
+    case 'sport':
+      return <SportGauge {...p} />;
+    case 'drum':
+      return <DrumGauge {...p} />;
+    case 'column':
+      return <ColumnGauge {...p} />;
+    case 'vfd':
+      return <VfdGauge {...p} />;
+    case 'led':
+      return <LedGauge {...p} />;
+    default:
+      return <TwinGauge {...p} />;
+  }
+}
